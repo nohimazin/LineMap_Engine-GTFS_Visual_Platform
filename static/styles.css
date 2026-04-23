@@ -165,6 +165,24 @@ button:hover {
   min-width: 0;
 }
 
+.merge-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.86rem;
+}
+
+.checkbox-row input {
+  width: auto;
+}
+
 .route-list {
   margin-top: 8px;
   overflow: auto;
