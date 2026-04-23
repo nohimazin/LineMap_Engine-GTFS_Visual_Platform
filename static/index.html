@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LineMap Engine GTFS Visual Platform</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=M+PLUS+1p:wght@400;500;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="background-pattern" aria-hidden="true"></div>
+    <div class="app-shell">
+      <aside class="left-panel">
+        <h1>LineMap Engine</h1>
+        <p class="subtitle">GTFS / GTFS-RT Visual Platform</p>
+
+        <section class="card">
+          <h2>GTFSアップロード</h2>
+          <input type="file" id="gtfsZipInput" accept=".zip" />
+          <button id="uploadBtn">GTFSを読み込む</button>
+          <p id="uploadResult" class="hint"></p>
+        </section>
+
+        <section class="card">
+          <h2>GTFS-RT設定</h2>
+          <input id="rtUrlInput" placeholder="https://example.com/vehiclePositions.pb" />
+          <div class="inline-controls">
+            <input id="rtIntervalInput" type="number" min="5" max="60" value="10" />
+            <span>秒</span>
+          </div>
+          <button id="rtSaveBtn">RT設定を保存</button>
+          <p id="rtStatus" class="hint"></p>
+        </section>
+
+        <section class="card grow">
+          <div class="card-header">
+            <h2>路線一覧</h2>
+            <input id="routeSearchInput" placeholder="路線名検索" />
+          </div>
+          <div id="routeList" class="route-list"></div>
+        </section>
+
+        <section class="card">
+          <h2>表示操作</h2>
+          <div class="inline-controls">
+            <button id="toggleStopsBtn">停留所 ON/OFF</button>
+            <button id="toggleVehiclesBtn">車両 ON/OFF</button>
+          </div>
+          <button id="exportPngBtn">現在表示をPNG保存</button>
+        </section>
+      </aside>
+
+      <main class="map-area">
+        <div id="map"></div>
+      </main>
+    </div>
+
+    <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
