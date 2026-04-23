@@ -3,9 +3,11 @@ const savedState = JSON.parse(localStorage.getItem("linemap:state") || "{}");
 
 const map = new maplibregl.Map({
   container: "map",
-  style: "https://demotiles.maplibre.org/style.json",
+  style: "https://tiles.openfreemap.org/styles/liberty",
   center: savedView?.center || [139.767, 35.681],
   zoom: savedView?.zoom || 11,
+  fadeDuration: 0,
+  renderWorldCopies: false,
 });
 
 map.addControl(new maplibregl.NavigationControl(), "top-right");
@@ -14,9 +16,11 @@ const state = {
   routes: { type: "FeatureCollection", features: [] },
   routeCatalog: [],
   stops: { type: "FeatureCollection", features: [] },
+  stopConnections: { type: "FeatureCollection", features: [] },
   vehicles: { type: "FeatureCollection", features: [] },
   visibleRouteIds: new Set(savedState.visibleRouteIds || []),
   showStops: savedState.showStops ?? true,
+  showStopConnections: savedState.showStopConnections ?? false,
   showVehicles: savedState.showVehicles ?? true,
 };
 
@@ -31,6 +35,7 @@ function saveUiState() {
     JSON.stringify({
       visibleRouteIds: Array.from(state.visibleRouteIds),
       showStops: state.showStops,
+      showStopConnections: state.showStopConnections,
       showVehicles: state.showVehicles,
     }),
   );
@@ -85,6 +90,21 @@ function createLayersIfNeeded() {
     });
   }
 
+  if (!map.getSource("stop-connections")) {
+    map.addSource("stop-connections", { type: "geojson", data: state.stopConnections });
+    map.addLayer({
+      id: "stop-connections-line",
+      type: "line",
+      source: "stop-connections",
+      paint: {
+        "line-color": ["concat", "#", ["get", "route_color"]],
+        "line-width": 2.5,
+        "line-opacity": 0.55,
+      },
+      layout: { visibility: state.showStopConnections ? "visible" : "none" },
+    });
+  }
+
   if (!map.getSource("vehicles")) {
     map.addSource("vehicles", { type: "geojson", data: state.vehicles });
     map.addLayer({
@@ -105,6 +125,9 @@ function createLayersIfNeeded() {
 function updateRouteFilter() {
   if (!map.getLayer("routes-line")) return;
   map.setFilter("routes-line", ["in", ["get", "route_id"], ["literal", Array.from(state.visibleRouteIds)]]);
+  if (map.getLayer("stop-connections-line")) {
+    map.setFilter("stop-connections-line", ["in", ["get", "route_id"], ["literal", Array.from(state.visibleRouteIds)]]);
+  }
 }
 
 function renderRouteList() {
@@ -149,16 +172,18 @@ function renderRouteList() {
 }
 
 async function reloadAllData() {
-  const [routes, routeCatalog, stops, vehiclesPayload] = await Promise.all([
+  const [routes, routeCatalog, stops, stopConnections, vehiclesPayload] = await Promise.all([
     api("/routes"),
     api("/route_catalog"),
     api("/stops"),
+    api("/stop_connections"),
     api("/vehicles"),
   ]);
 
   state.routes = routes;
   state.routeCatalog = routeCatalog;
   state.stops = stops;
+  state.stopConnections = stopConnections;
   state.vehicles = vehiclesPayload.vehicles;
 
   if (state.visibleRouteIds.size === 0) {
@@ -169,6 +194,7 @@ async function reloadAllData() {
 
   map.getSource("routes")?.setData(state.routes);
   map.getSource("stops")?.setData(state.stops);
+  map.getSource("stop-connections")?.setData(state.stopConnections);
   map.getSource("vehicles")?.setData(state.vehicles);
 
   updateRouteFilter();
@@ -232,6 +258,16 @@ function wireActions() {
     saveUiState();
   });
 
+  document.getElementById("toggleStopConnectionsBtn").addEventListener("click", () => {
+    state.showStopConnections = !state.showStopConnections;
+    map.setLayoutProperty(
+      "stop-connections-line",
+      "visibility",
+      state.showStopConnections ? "visible" : "none",
+    );
+    saveUiState();
+  });
+
   document.getElementById("exportPngBtn").addEventListener("click", () => {
     const link = document.createElement("a");
     link.href = map.getCanvas().toDataURL("image/png");
@@ -260,18 +296,32 @@ function wireActions() {
       .addTo(map);
   });
 
+  map.on("click", "stop-connections-line", (e) => {
+    const f = e.features?.[0];
+    if (!f) return;
+    const p = f.properties || {};
+    new maplibregl.Popup()
+      .setLngLat(e.lngLat)
+      .setHTML(`<b>停留所連結線</b><br/>route_id: ${p.route_id}<br/>trip_id: ${p.trip_id}`)
+      .addTo(map);
+  });
+
   map.on("moveend", saveMapView);
 }
 
 map.on("load", async () => {
   createLayersIfNeeded();
   wireActions();
+  rtStatus.textContent = "ベースマップを表示中...";
 
-  try {
-    await reloadAllData();
-  } catch (err) {
-    rtStatus.textContent = `初期読み込み失敗: ${err.message}`;
-  }
+  map.once("idle", async () => {
+    try {
+      rtStatus.textContent = "GTFSデータを読み込み中...";
+      await reloadAllData();
+    } catch (err) {
+      rtStatus.textContent = `初期読み込み失敗: ${err.message}`;
+    }
+  });
 
   setInterval(async () => {
     try {

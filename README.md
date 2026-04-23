@@ -16,6 +16,7 @@ GTFS / GTFS-RT を地図上に可視化する FastAPI + MapLibre ベースのWeb
 
 - Backend: FastAPI
 - Frontend: MapLibre GL JS
+- Base Map: OpenFreeMap (Liberty style)
 - Data Store: メモリ + SQLite（`data/linemap.db`）
 - Data Format: GeoJSON
 

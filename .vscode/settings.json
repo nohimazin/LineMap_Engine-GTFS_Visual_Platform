@@ -1,3 +1,10 @@
 {
-    "specstory.cloudSync.enabled": "always"
+    "specstory.cloudSync.enabled": "always",
+    "python-envs.pythonProjects": [
+        {
+            "path": ".",
+            "envManager": "ms-python.python:venv",
+            "packageManager": "ms-python.python:pip"
+        }
+    ]
 }

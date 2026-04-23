@@ -6,6 +6,7 @@
     <title>LineMap Engine GTFS Visual Platform</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=M+PLUS+1p:wght@400;500;700;800&display=swap"
       rel="stylesheet"
@@ -30,7 +31,7 @@
         <section class="card">
           <h2>GTFS-RT設定</h2>
           <input id="rtUrlInput" placeholder="https://example.com/vehiclePositions.pb" />
-          <div class="inline-controls">
+          <div class="inline-controls rt-interval-row">
             <input id="rtIntervalInput" type="number" min="5" max="60" value="10" />
             <span>秒</span>
           </div>
@@ -48,10 +49,11 @@
 
         <section class="card">
           <h2>表示操作</h2>
-          <div class="inline-controls">
+          <div class="inline-controls action-buttons-row">
             <button id="toggleStopsBtn">停留所 ON/OFF</button>
             <button id="toggleVehiclesBtn">車両 ON/OFF</button>
           </div>
+          <button id="toggleStopConnectionsBtn">停留所連結線 ON/OFF</button>
           <button id="exportPngBtn">現在表示をPNG保存</button>
         </section>
       </aside>
