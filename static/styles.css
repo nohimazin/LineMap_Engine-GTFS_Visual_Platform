@@ -1,0 +1,218 @@
+:root {
+  --bg1: #f3f6ed;
+  --bg2: #e8efe0;
+  --ink: #1e2b21;
+  --muted: #5a6a5d;
+  --card: rgba(255, 255, 255, 0.82);
+  --accent: #1f7a55;
+  --accent-strong: #0f5134;
+  --border: #cad7c7;
+  --panel-width: 360px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  font-family: "M PLUS 1p", "Hiragino Kaku Gothic ProN", sans-serif;
+  color: var(--ink);
+  background: linear-gradient(125deg, var(--bg1), var(--bg2));
+}
+
+.background-pattern {
+  position: fixed;
+  inset: 0;
+  background-image: radial-gradient(circle at 20% 20%, rgba(42, 112, 67, 0.12) 0, transparent 45%),
+    radial-gradient(circle at 80% 10%, rgba(23, 64, 39, 0.08) 0, transparent 40%),
+    linear-gradient(45deg, rgba(255, 255, 255, 0.2) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255, 255, 255, 0.2) 25%, transparent 25%);
+  background-size: auto, auto, 24px 24px, 24px 24px;
+  background-position: 0 0, 0 0, 0 0, 12px 12px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.app-shell {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: var(--panel-width) 1fr;
+  width: 100%;
+  height: 100%;
+  gap: 14px;
+  padding: 14px;
+}
+
+.left-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.left-panel h1 {
+  margin: 0;
+  letter-spacing: 0.05em;
+  font-size: 1.5rem;
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px;
+  box-shadow: 0 8px 22px rgba(36, 61, 43, 0.08);
+  animation: fade-slide 0.45s ease;
+}
+
+.card h2 {
+  margin: 0 0 8px;
+  font-size: 0.96rem;
+}
+
+.grow {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+input,
+button {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  font-family: inherit;
+}
+
+button {
+  background: linear-gradient(120deg, var(--accent), var(--accent-strong));
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-weight: 700;
+  margin-top: 8px;
+  transition: transform 0.12s ease, filter 0.18s ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+}
+
+.inline-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.inline-controls input {
+  width: 88px;
+}
+
+.route-list {
+  margin-top: 8px;
+  overflow: auto;
+  min-height: 120px;
+  max-height: 34vh;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 4px;
+}
+
+.route-item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.66);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.route-chip {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+.route-label {
+  font-size: 0.82rem;
+  line-height: 1.25;
+}
+
+.hint {
+  min-height: 1.4em;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 8px 0 0;
+}
+
+.map-area {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 16px 32px rgba(19, 45, 28, 0.14);
+  animation: fade-slide 0.55s ease;
+}
+
+#map {
+  width: 100%;
+  height: 100%;
+}
+
+.maplibregl-popup-content {
+  font-family: inherit;
+}
+
+@keyframes fade-slide {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 980px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .left-panel {
+    max-height: 48vh;
+    overflow: auto;
+  }
+
+  .route-list {
+    max-height: 18vh;
+  }
+
+  .map-area {
+    min-height: 50vh;
+  }
+}
