@@ -58,6 +58,16 @@
 
         <section class="card">
           <h2>表示操作</h2>
+          <div class="merge-options">
+            <label class="checkbox-row">
+              <input id="mergeRoundTripToggle" type="checkbox" />
+              <span>往復路線を統合表示</span>
+            </label>
+            <select id="mergeColorSideSelect">
+              <option value="first">統合時カラー: route_idが小さい側</option>
+              <option value="second">統合時カラー: route_idが大きい側</option>
+            </select>
+          </div>
           <div class="inline-controls action-buttons-row">
             <button id="toggleStopsBtn">停留所 ON/OFF</button>
             <button id="toggleVehiclesBtn">車両 ON/OFF</button>
