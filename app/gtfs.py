@@ -7,8 +7,21 @@ from typing import Any
 
 
 def _read_csv_from_zip(archive: zipfile.ZipFile, name: str) -> list[dict[str, str]]:
+    target = name.lower()
+    member_name = None
+    for info in archive.infolist():
+        if info.is_dir():
+            continue
+        base_name = info.filename.replace("\\", "/").split("/")[-1].lower()
+        if base_name == target:
+            member_name = info.filename
+            break
+
+    if member_name is None:
+        return []
+
     try:
-        with archive.open(name) as raw:
+        with archive.open(member_name) as raw:
             decoded = io.TextIOWrapper(raw, encoding="utf-8-sig")
             return list(csv.DictReader(decoded))
     except KeyError:

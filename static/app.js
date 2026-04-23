@@ -1,9 +1,24 @@
 const savedView = JSON.parse(localStorage.getItem("linemap:view") || "null");
 const savedState = JSON.parse(localStorage.getItem("linemap:state") || "{}");
+const BASEMAP_STYLES = {
+  liberty: "https://tiles.openfreemap.org/styles/liberty",
+  bright: "https://tiles.openfreemap.org/styles/bright",
+  positron: "https://tiles.openfreemap.org/styles/positron",
+};
+
+function resolveInitialStyle(styleUrl) {
+  const candidates = Object.values(BASEMAP_STYLES);
+  if (styleUrl && candidates.includes(styleUrl)) {
+    return styleUrl;
+  }
+  return BASEMAP_STYLES.liberty;
+}
+
+const initialStyle = resolveInitialStyle(savedState.baseMapStyle);
 
 const map = new maplibregl.Map({
   container: "map",
-  style: "https://tiles.openfreemap.org/styles/liberty",
+  style: initialStyle,
   center: savedView?.center || [139.767, 35.681],
   zoom: savedView?.zoom || 11,
   fadeDuration: 0,
@@ -22,12 +37,14 @@ const state = {
   showStops: savedState.showStops ?? true,
   showStopConnections: savedState.showStopConnections ?? false,
   showVehicles: savedState.showVehicles ?? true,
+  baseMapStyle: initialStyle,
 };
 
 const routeList = document.getElementById("routeList");
 const routeSearchInput = document.getElementById("routeSearchInput");
 const uploadResult = document.getElementById("uploadResult");
 const rtStatus = document.getElementById("rtStatus");
+const mapStyleSelect = document.getElementById("mapStyleSelect");
 
 function saveUiState() {
   localStorage.setItem(
@@ -37,8 +54,50 @@ function saveUiState() {
       showStops: state.showStops,
       showStopConnections: state.showStopConnections,
       showVehicles: state.showVehicles,
+      baseMapStyle: state.baseMapStyle,
     }),
   );
+}
+
+function syncSourcesData() {
+  map.getSource("routes")?.setData(state.routes);
+  map.getSource("stops")?.setData(state.stops);
+  map.getSource("stop-connections")?.setData(state.stopConnections);
+  map.getSource("vehicles")?.setData(state.vehicles);
+}
+
+function applyLayerVisibility() {
+  if (map.getLayer("stops-circle")) {
+    map.setLayoutProperty("stops-circle", "visibility", state.showStops ? "visible" : "none");
+  }
+  if (map.getLayer("stop-connections-line")) {
+    map.setLayoutProperty("stop-connections-line", "visibility", state.showStopConnections ? "visible" : "none");
+  }
+  if (map.getLayer("vehicles-symbol")) {
+    map.setLayoutProperty("vehicles-symbol", "visibility", state.showVehicles ? "visible" : "none");
+  }
+}
+
+function refreshOverlayLayers() {
+  createLayersIfNeeded();
+  syncSourcesData();
+  updateRouteFilter();
+  applyLayerVisibility();
+}
+
+function switchBaseMapStyle(styleUrl) {
+  if (!styleUrl || styleUrl === state.baseMapStyle) {
+    return;
+  }
+
+  state.baseMapStyle = styleUrl;
+  saveUiState();
+  rtStatus.textContent = "地図スタイルを切り替え中...";
+  map.setStyle(styleUrl);
+  map.once("style.load", () => {
+    refreshOverlayLayers();
+    rtStatus.textContent = "地図スタイルを切り替えました。";
+  });
 }
 
 function saveMapView() {
@@ -191,13 +250,7 @@ async function reloadAllData() {
   }
 
   createLayersIfNeeded();
-
-  map.getSource("routes")?.setData(state.routes);
-  map.getSource("stops")?.setData(state.stops);
-  map.getSource("stop-connections")?.setData(state.stopConnections);
-  map.getSource("vehicles")?.setData(state.vehicles);
-
-  updateRouteFilter();
+  refreshOverlayLayers();
   renderRouteList();
   rtStatus.textContent = vehiclesPayload.status?.last_error
     ? `RT Error: ${vehiclesPayload.status.last_error}`
@@ -243,6 +296,10 @@ async function saveRtConfig() {
 function wireActions() {
   document.getElementById("uploadBtn").addEventListener("click", uploadGtfs);
   document.getElementById("rtSaveBtn").addEventListener("click", saveRtConfig);
+  mapStyleSelect.value = state.baseMapStyle;
+  mapStyleSelect.addEventListener("change", (event) => {
+    switchBaseMapStyle(event.target.value);
+  });
 
   routeSearchInput.addEventListener("input", renderRouteList);
 
@@ -310,7 +367,7 @@ function wireActions() {
 }
 
 map.on("load", async () => {
-  createLayersIfNeeded();
+  refreshOverlayLayers();
   wireActions();
   rtStatus.textContent = "ベースマップを表示中...";
 

@@ -22,6 +22,15 @@
         <p class="subtitle">GTFS / GTFS-RT Visual Platform</p>
 
         <section class="card">
+          <h2>地図スタイル</h2>
+          <select id="mapStyleSelect">
+            <option value="https://tiles.openfreemap.org/styles/liberty">OpenFreeMap Liberty</option>
+            <option value="https://tiles.openfreemap.org/styles/bright">OpenFreeMap Bright</option>
+            <option value="https://tiles.openfreemap.org/styles/positron">OpenFreeMap Positron</option>
+          </select>
+        </section>
+
+        <section class="card">
           <h2>GTFSアップロード</h2>
           <input type="file" id="gtfsZipInput" accept=".zip" />
           <button id="uploadBtn">GTFSを読み込む</button>
