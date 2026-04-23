@@ -73,6 +73,9 @@ function applyLayerVisibility() {
   if (map.getLayer("stop-connections-line")) {
     map.setLayoutProperty("stop-connections-line", "visibility", state.showStopConnections ? "visible" : "none");
   }
+  if (map.getLayer("stop-connections-line-hit")) {
+    map.setLayoutProperty("stop-connections-line-hit", "visibility", state.showStopConnections ? "visible" : "none");
+  }
   if (map.getLayer("vehicles-symbol")) {
     map.setLayoutProperty("vehicles-symbol", "visibility", state.showVehicles ? "visible" : "none");
   }
@@ -131,6 +134,17 @@ function createLayersIfNeeded() {
       },
       filter: ["in", ["get", "route_id"], ["literal", Array.from(state.visibleRouteIds)]],
     });
+    map.addLayer({
+      id: "routes-line-hit",
+      type: "line",
+      source: "routes",
+      paint: {
+        "line-color": "#000000",
+        "line-width": 8,
+        "line-opacity": 0.01,
+      },
+      filter: ["in", ["get", "route_id"], ["literal", Array.from(state.visibleRouteIds)]],
+    });
   }
 
   if (!map.getSource("stops")) {
@@ -162,6 +176,17 @@ function createLayersIfNeeded() {
       },
       layout: { visibility: state.showStopConnections ? "visible" : "none" },
     });
+    map.addLayer({
+      id: "stop-connections-line-hit",
+      type: "line",
+      source: "stop-connections",
+      paint: {
+        "line-color": "#000000",
+        "line-width": 7,
+        "line-opacity": 0.01,
+      },
+      layout: { visibility: state.showStopConnections ? "visible" : "none" },
+    });
   }
 
   if (!map.getSource("vehicles")) {
@@ -184,8 +209,14 @@ function createLayersIfNeeded() {
 function updateRouteFilter() {
   if (!map.getLayer("routes-line")) return;
   map.setFilter("routes-line", ["in", ["get", "route_id"], ["literal", Array.from(state.visibleRouteIds)]]);
+  if (map.getLayer("routes-line-hit")) {
+    map.setFilter("routes-line-hit", ["in", ["get", "route_id"], ["literal", Array.from(state.visibleRouteIds)]]);
+  }
   if (map.getLayer("stop-connections-line")) {
     map.setFilter("stop-connections-line", ["in", ["get", "route_id"], ["literal", Array.from(state.visibleRouteIds)]]);
+  }
+  if (map.getLayer("stop-connections-line-hit")) {
+    map.setFilter("stop-connections-line-hit", ["in", ["get", "route_id"], ["literal", Array.from(state.visibleRouteIds)]]);
   }
 }
 
@@ -228,6 +259,14 @@ function renderRouteList() {
     item.append(checkbox, chip, label);
     routeList.appendChild(item);
   });
+}
+
+function getRouteDisplayName(routeId) {
+  if (!routeId) return "不明路線";
+  const route = state.routeCatalog.find((item) => item.route_id === routeId);
+  if (!route) return routeId;
+  const name = `${route.route_short_name || ""} ${route.route_long_name || ""}`.trim();
+  return name || routeId;
 }
 
 async function reloadAllData() {
@@ -322,6 +361,13 @@ function wireActions() {
       "visibility",
       state.showStopConnections ? "visible" : "none",
     );
+    if (map.getLayer("stop-connections-line-hit")) {
+      map.setLayoutProperty(
+        "stop-connections-line-hit",
+        "visibility",
+        state.showStopConnections ? "visible" : "none",
+      );
+    }
     saveUiState();
   });
 
@@ -332,7 +378,7 @@ function wireActions() {
     link.click();
   });
 
-  map.on("click", "routes-line", (e) => {
+  map.on("click", "routes-line-hit", (e) => {
     const f = e.features?.[0];
     if (!f) return;
     const p = f.properties || {};
@@ -353,13 +399,16 @@ function wireActions() {
       .addTo(map);
   });
 
-  map.on("click", "stop-connections-line", (e) => {
+  map.on("click", "stop-connections-line-hit", (e) => {
     const f = e.features?.[0];
     if (!f) return;
     const p = f.properties || {};
+    const routeName = getRouteDisplayName(p.route_id);
     new maplibregl.Popup()
       .setLngLat(e.lngLat)
-      .setHTML(`<b>停留所連結線</b><br/>route_id: ${p.route_id}<br/>trip_id: ${p.trip_id}`)
+      .setHTML(
+        `<b>停留所連結線</b><br/>路線名: ${routeName}<br/>route_id: ${p.route_id || ""}<br/>trip_id: ${p.trip_id || ""}`,
+      )
       .addTo(map);
   });
 
