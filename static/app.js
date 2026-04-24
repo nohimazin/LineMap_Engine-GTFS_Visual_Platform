@@ -44,6 +44,7 @@ const state = {
   showVehicles: savedState.showVehicles ?? true,
   mergeRoundTrip: savedState.mergeRoundTrip ?? false,
   mergeColorSide: savedState.mergeColorSide || "first",
+  stopConnectionsLineWidth: savedState.stopConnectionsLineWidth ?? 2.5,
   baseMapStyle: initialStyle,
 };
 
@@ -54,6 +55,8 @@ const rtStatus = document.getElementById("rtStatus");
 const mapStyleSelect = document.getElementById("mapStyleSelect");
 const mergeRoundTripToggle = document.getElementById("mergeRoundTripToggle");
 const mergeColorSideSelect = document.getElementById("mergeColorSideSelect");
+const stopConnectionsWidthRange = document.getElementById("stopConnectionsWidthRange");
+const stopConnectionsWidthInput = document.getElementById("stopConnectionsWidthInput");
 const toggleStopConnectionsBtn = document.getElementById("toggleStopConnectionsBtn");
 let debugOverlay = null;
 
@@ -102,9 +105,47 @@ function saveUiState() {
       showVehicles: state.showVehicles,
       mergeRoundTrip: state.mergeRoundTrip,
       mergeColorSide: state.mergeColorSide,
+      stopConnectionsLineWidth: state.stopConnectionsLineWidth,
       baseMapStyle: state.baseMapStyle,
     }),
   );
+}
+
+function clampStopConnectionsLineWidth(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return 2.5;
+  }
+  return Math.max(1, Math.min(20, numericValue));
+}
+
+function formatStopConnectionsLineWidth(value) {
+  return Number(value).toFixed(1);
+}
+
+function syncStopConnectionsWidthControls() {
+  if (stopConnectionsWidthRange) {
+    stopConnectionsWidthRange.value = String(state.stopConnectionsLineWidth);
+  }
+  if (stopConnectionsWidthInput) {
+    stopConnectionsWidthInput.value = formatStopConnectionsLineWidth(state.stopConnectionsLineWidth);
+  }
+}
+
+function applyStopConnectionsLineWidth() {
+  if (map.getLayer("stop-connections-line")) {
+    map.setPaintProperty("stop-connections-line", "line-width", state.stopConnectionsLineWidth);
+  }
+  if (map.getLayer("stop-connections-line-hit")) {
+    map.setPaintProperty("stop-connections-line-hit", "line-width", Math.max(10, state.stopConnectionsLineWidth + 7));
+  }
+}
+
+function applyRouteLineWidth() {
+  const routeLineWidth = state.mergeRoundTrip ? state.stopConnectionsLineWidth : 3;
+  if (map.getLayer("routes-line")) {
+    map.setPaintProperty("routes-line", "line-width", routeLineWidth);
+  }
 }
 
 function syncSourcesData() {
@@ -115,14 +156,15 @@ function syncSourcesData() {
 }
 
 function applyLayerVisibility() {
+  const stopConnectionsVisible = state.showStopConnections && !state.mergeRoundTrip;
   if (map.getLayer("stops-circle")) {
     map.setLayoutProperty("stops-circle", "visibility", state.showStops ? "visible" : "none");
   }
   if (map.getLayer("stop-connections-line")) {
-    map.setLayoutProperty("stop-connections-line", "visibility", state.showStopConnections ? "visible" : "none");
+    map.setLayoutProperty("stop-connections-line", "visibility", stopConnectionsVisible ? "visible" : "none");
   }
   if (map.getLayer("stop-connections-line-hit")) {
-    map.setLayoutProperty("stop-connections-line-hit", "visibility", state.showStopConnections ? "visible" : "none");
+    map.setLayoutProperty("stop-connections-line-hit", "visibility", stopConnectionsVisible ? "visible" : "none");
   }
   if (map.getLayer("vehicles-symbol")) {
     map.setLayoutProperty("vehicles-symbol", "visibility", state.showVehicles ? "visible" : "none");
@@ -155,6 +197,8 @@ function applyMergeModeVisualPolicy() {
       map.setLayoutProperty("routes-line-hit", "visibility", "visible");
     }
   }
+
+  applyRouteLineWidth();
 
   if (toggleStopConnectionsBtn) {
     toggleStopConnectionsBtn.disabled = false;
@@ -599,7 +643,7 @@ function createLayersIfNeeded() {
       source: "routes",
       paint: {
         "line-color": ["concat", "#", ["get", "route_color"]],
-        "line-width": 3,
+        "line-width": state.mergeRoundTrip ? state.stopConnectionsLineWidth : 3,
         "line-opacity": 0.95,
       },
       filter: ["in", ["get", "route_id"], ["literal", Array.from(state.visibleRouteIds)]],
@@ -641,7 +685,7 @@ function createLayersIfNeeded() {
       source: "stop-connections",
       paint: {
         "line-color": ["concat", "#", ["get", "route_color"]],
-        "line-width": 2.5,
+        "line-width": state.stopConnectionsLineWidth,
         "line-opacity": 0.55,
       },
       layout: { visibility: state.showStopConnections ? "visible" : "none" },
@@ -652,7 +696,7 @@ function createLayersIfNeeded() {
       source: "stop-connections",
       paint: {
         "line-color": "#000000",
-        "line-width": 10,
+        "line-width": Math.max(10, state.stopConnectionsLineWidth + 7),
         "line-opacity": 0,
       },
       layout: { visibility: state.showStopConnections ? "visible" : "none" },
@@ -815,6 +859,7 @@ function wireActions() {
   mergeRoundTripToggle.checked = state.mergeRoundTrip;
   mergeColorSideSelect.value = state.mergeColorSide;
   mergeColorSideSelect.disabled = !state.mergeRoundTrip;
+  syncStopConnectionsWidthControls();
 
   mapStyleSelect.addEventListener("change", (event) => {
     switchBaseMapStyle(event.target.value);
@@ -840,6 +885,22 @@ function wireActions() {
       renderRouteList();
     }
     saveUiState();
+  });
+
+  function updateStopConnectionsWidth(value) {
+    state.stopConnectionsLineWidth = clampStopConnectionsLineWidth(value);
+    syncStopConnectionsWidthControls();
+    applyStopConnectionsLineWidth();
+    applyRouteLineWidth();
+    saveUiState();
+  }
+
+  stopConnectionsWidthRange?.addEventListener("input", (event) => {
+    updateStopConnectionsWidth(event.target.value);
+  });
+
+  stopConnectionsWidthInput?.addEventListener("change", (event) => {
+    updateStopConnectionsWidth(event.target.value);
   });
 
   routeSearchInput.addEventListener("input", renderRouteList);
