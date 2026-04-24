@@ -261,7 +261,7 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
             route_lines[route_id].append(line)
 
     stop_connection_features: list[dict[str, Any]] = []
-    generated_shape_ids: set[str] = set()
+    generated_connection_keys: set[tuple[str, str, tuple[str, ...]]] = set()
     trip_stop_items = sorted(trip_stop_times.items(), key=lambda item: item[0])
     for trip_id, stop_items in trip_stop_items:
         route_id = trip_to_route.get(trip_id, "")
@@ -270,8 +270,6 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
             continue
 
         shape_line = [[lon, lat] for lon, lat, _ in sorted(shape_points.get(shape_id, []), key=lambda p: p[2])] if shape_id else []
-        if shape_id and shape_id in generated_shape_ids:
-            continue
 
         ordered_stops = []
         for sequence_value, stop_id in sorted(stop_items, key=lambda item: item[0]):
@@ -281,6 +279,12 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
             ordered_stops.append((sequence_value, stop_id, coord))
 
         if len(ordered_stops) < 2:
+            continue
+
+        stop_id_sequence = tuple(stop_id for _, stop_id, _ in ordered_stops)
+        dedup_shape_key = shape_id if shape_id else f"trip:{trip_id}"
+        connection_key = (route_id, dedup_shape_key, stop_id_sequence)
+        if connection_key in generated_connection_keys:
             continue
 
         connection_coordinates: list[list[float]] = []
@@ -324,9 +328,7 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
                 },
             }
         )
-
-        if shape_id:
-            generated_shape_ids.add(shape_id)
+        generated_connection_keys.add(connection_key)
 
     route_features: list[dict[str, Any]] = []
     route_catalog: list[dict[str, Any]] = []

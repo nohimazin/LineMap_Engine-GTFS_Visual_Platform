@@ -51,3 +51,12 @@ uvicorn app.main:app --reload
 
 - GTFS-RTは protobuf の Vehicle Positions フィードを想定しています。
 - 必須GTFSファイルは `routes.txt`, `trips.txt`, `stops.txt` です。`shapes.txt` があれば線形状を描画します。
+
+## 運用時チェックリスト
+
+- GTFS ZIP投入前に `routes.txt`, `trips.txt`, `stops.txt` が含まれていることを確認する
+- アップロード後に `/routes`, `/stops`, `/stop_connections` の件数が極端に0件でないことを確認する
+- 往復統合ON/OFF時に表示件数と色が大きく崩れていないことをデバッグ表示で確認する
+- `shape_id` を共有する便を含むデータで停留所連結線が欠落しないことを確認する
+- GTFS-RT設定時は `/vehicles` の `status.last_error` が空であることを確認する
+- 大規模データ投入時は初回表示とレイヤー切替の体感速度を確認し、問題があればデータを分割して検証する
