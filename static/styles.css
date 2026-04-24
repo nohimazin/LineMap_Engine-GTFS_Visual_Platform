@@ -240,6 +240,26 @@ button:hover {
   font-family: inherit;
 }
 
+.debug-overlay {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 30;
+  margin: 0;
+  padding: 10px 12px;
+  max-width: min(92vw, 360px);
+  max-height: 45dvh;
+  overflow: auto;
+  background: rgba(12, 20, 15, 0.82);
+  color: #dff5e5;
+  border: 1px solid rgba(159, 216, 174, 0.5);
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.35;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  pointer-events: none;
+}
+
 @keyframes fade-slide {
   from {
     opacity: 0;
@@ -320,5 +340,11 @@ button:hover {
 
   .left-panel {
     padding-right: 2px;
+  }
+
+  .debug-overlay {
+    right: 10px;
+    bottom: 10px;
+    font-size: 11px;
   }
 }

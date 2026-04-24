@@ -54,6 +54,43 @@ const rtStatus = document.getElementById("rtStatus");
 const mapStyleSelect = document.getElementById("mapStyleSelect");
 const mergeRoundTripToggle = document.getElementById("mergeRoundTripToggle");
 const mergeColorSideSelect = document.getElementById("mergeColorSideSelect");
+const toggleStopConnectionsBtn = document.getElementById("toggleStopConnectionsBtn");
+let debugOverlay = null;
+
+function getLayerVisibility(layerId) {
+  if (!map.getLayer(layerId)) return "missing";
+  return map.getLayoutProperty(layerId, "visibility") || "visible";
+}
+
+function ensureDebugOverlay() {
+  if (debugOverlay) return debugOverlay;
+  debugOverlay = document.createElement("pre");
+  debugOverlay.id = "debugOverlay";
+  debugOverlay.className = "debug-overlay";
+  document.body.appendChild(debugOverlay);
+  return debugOverlay;
+}
+
+function updateDebugOverlay() {
+  const node = ensureDebugOverlay();
+  const lines = [
+    "Debug Overlay",
+    `mergeRoundTrip: ${state.mergeRoundTrip ? "ON" : "OFF"}`,
+    `mergeColorSide: ${state.mergeColorSide}`,
+    `visibleRouteIds: ${state.visibleRouteIds.size}`,
+    `routes(features): ${state.routes.features?.length || 0}`,
+    `stopConnections(features): ${state.stopConnections.features?.length || 0}`,
+    "",
+    "Layer Visibility",
+    `routes-line: ${getLayerVisibility("routes-line")}`,
+    `routes-line-hit: ${getLayerVisibility("routes-line-hit")}`,
+    `stop-connections-line: ${getLayerVisibility("stop-connections-line")}`,
+    `stop-connections-line-hit: ${getLayerVisibility("stop-connections-line-hit")}`,
+    `stops-circle: ${getLayerVisibility("stops-circle")}`,
+    `vehicles-symbol: ${getLayerVisibility("vehicles-symbol")}`,
+  ];
+  node.textContent = lines.join("\n");
+}
 
 function saveUiState() {
   localStorage.setItem(
@@ -90,13 +127,49 @@ function applyLayerVisibility() {
   if (map.getLayer("vehicles-symbol")) {
     map.setLayoutProperty("vehicles-symbol", "visibility", state.showVehicles ? "visible" : "none");
   }
+  updateDebugOverlay();
 }
 
 function refreshOverlayLayers() {
   createLayersIfNeeded();
   syncSourcesData();
   updateRouteFilter();
+  applyMergeModeVisualPolicy();
   applyLayerVisibility();
+  updateDebugOverlay();
+}
+
+function applyMergeModeVisualPolicy() {
+  if (state.mergeRoundTrip) {
+    state.showStopConnections = false;
+    if (map.getLayer("routes-line")) {
+      map.setLayoutProperty("routes-line", "visibility", "visible");
+    }
+    if (map.getLayer("routes-line-hit")) {
+      map.setLayoutProperty("routes-line-hit", "visibility", "visible");
+    }
+    if (map.getLayer("stop-connections-line")) {
+      map.setLayoutProperty("stop-connections-line", "visibility", "none");
+    }
+    if (map.getLayer("stop-connections-line-hit")) {
+      map.setLayoutProperty("stop-connections-line-hit", "visibility", "none");
+    }
+  } else {
+    if (map.getLayer("routes-line")) {
+      map.setLayoutProperty("routes-line", "visibility", "visible");
+    }
+    if (map.getLayer("routes-line-hit")) {
+      map.setLayoutProperty("routes-line-hit", "visibility", "visible");
+    }
+  }
+
+  if (toggleStopConnectionsBtn) {
+    toggleStopConnectionsBtn.disabled = state.mergeRoundTrip;
+    toggleStopConnectionsBtn.textContent = state.mergeRoundTrip
+      ? "停留所連結線 ON/OFF（統合中は無効）"
+      : "停留所連結線 ON/OFF";
+  }
+  updateDebugOverlay();
 }
 
 function switchBaseMapStyle(styleUrl) {
@@ -135,6 +208,115 @@ function deepClone(obj) {
   return JSON.parse(JSON.stringify(obj));
 }
 
+function distance2d(a, b) {
+  const dx = a[0] - b[0];
+  const dy = a[1] - b[1];
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function lineLength(line) {
+  if (!Array.isArray(line) || line.length < 2) return 0;
+  let total = 0;
+  for (let i = 0; i < line.length - 1; i += 1) {
+    total += distance2d(line[i], line[i + 1]);
+  }
+  return total;
+}
+
+function flattenToLines(geometry) {
+  if (!geometry) return [];
+  if (geometry.type === "LineString") {
+    return [geometry.coordinates || []];
+  }
+  if (geometry.type === "MultiLineString") {
+    return geometry.coordinates || [];
+  }
+  return [];
+}
+
+function pickLongestLine(geometry) {
+  const lines = flattenToLines(geometry);
+  if (lines.length === 0) return [];
+  let best = lines[0];
+  let bestLen = lineLength(best);
+  for (let i = 1; i < lines.length; i += 1) {
+    const currentLen = lineLength(lines[i]);
+    if (currentLen > bestLen) {
+      best = lines[i];
+      bestLen = currentLen;
+    }
+  }
+  return best;
+}
+
+function pointAtDistance(line, targetDistance) {
+  if (!Array.isArray(line) || line.length === 0) return null;
+  if (line.length === 1) return line[0];
+  if (targetDistance <= 0) return line[0];
+
+  let walked = 0;
+  for (let i = 0; i < line.length - 1; i += 1) {
+    const a = line[i];
+    const b = line[i + 1];
+    const segLen = distance2d(a, b);
+    if (segLen === 0) continue;
+
+    if (walked + segLen >= targetDistance) {
+      const ratio = (targetDistance - walked) / segLen;
+      return [a[0] + (b[0] - a[0]) * ratio, a[1] + (b[1] - a[1]) * ratio];
+    }
+    walked += segLen;
+  }
+  return line[line.length - 1];
+}
+
+function resampleLine(line, count) {
+  if (!Array.isArray(line) || line.length < 2) return [];
+  const total = lineLength(line);
+  if (total === 0) return [];
+  const result = [];
+  for (let i = 0; i < count; i += 1) {
+    const ratio = i / (count - 1);
+    const pt = pointAtDistance(line, total * ratio);
+    if (pt) result.push(pt);
+  }
+  return result;
+}
+
+function alignLineDirection(sampleA, sampleB) {
+  const direct = distance2d(sampleA[0], sampleB[0]) + distance2d(sampleA[sampleA.length - 1], sampleB[sampleB.length - 1]);
+  const reversed =
+    distance2d(sampleA[0], sampleB[sampleB.length - 1]) +
+    distance2d(sampleA[sampleA.length - 1], sampleB[0]);
+  if (reversed < direct) {
+    return [...sampleB].reverse();
+  }
+  return sampleB;
+}
+
+function buildCenterLine(lineA, lineB) {
+  if (lineA.length < 2 || lineB.length < 2) return [];
+  const sampleCount = Math.max(24, Math.min(140, Math.max(lineA.length, lineB.length) * 2));
+  const sampleA = resampleLine(lineA, sampleCount);
+  const sampleB = resampleLine(lineB, sampleCount);
+  if (sampleA.length < 2 || sampleB.length < 2) return [];
+
+  const alignedB = alignLineDirection(sampleA, sampleB);
+  const center = [];
+  for (let i = 0; i < sampleCount; i += 1) {
+    center.push([(sampleA[i][0] + alignedB[i][0]) / 2, (sampleA[i][1] + alignedB[i][1]) / 2]);
+  }
+
+  // Remove near-duplicate consecutive points to keep geometry compact.
+  const deduped = [center[0]];
+  for (let i = 1; i < center.length; i += 1) {
+    if (distance2d(center[i], deduped[deduped.length - 1]) > 1e-9) {
+      deduped.push(center[i]);
+    }
+  }
+  return deduped;
+}
+
 function normalizeTerminalName(value) {
   return (value || "")
     .trim()
@@ -156,11 +338,16 @@ function parseDirectionalPair(longName) {
     }
   }
 
-  // Examples: "xyz駅->abc前", "xyz駅→abc前", "xyz駅 - abc前"
-  const sepPattern = text.split(/\s*(?:->|→|ー|－|―|-|〜|~|⇔|↔|⇄|<->)\s*/);
-  if (sepPattern.length === 2) {
-    const from = normalizeTerminalName(sepPattern[0]);
-    const to = normalizeTerminalName(sepPattern[1]);
+  // Examples:
+  // "xyz駅->abc前"
+  // "三角産交→三角病院～大口→松橋駅" (first/last terminal are used)
+  const arrowParts = text
+    .split(/\s*(?:<->|->|←|→|⇔|↔|⇄)\s*/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  if (arrowParts.length >= 2) {
+    const from = normalizeTerminalName(arrowParts[0]);
+    const to = normalizeTerminalName(arrowParts[arrowParts.length - 1]);
     if (from && to) {
       return [from, to];
     }
@@ -202,6 +389,10 @@ function buildMergedLabel(routes) {
   return uniqueNames.slice(0, 2).join(" / ") || routes.map((route) => route.route_id).join(" / ");
 }
 
+function normalizeRouteId(value) {
+  return String(value ?? "").trim();
+}
+
 function normalizeRouteDatasets() {
   if (!state.mergeRoundTrip) {
     state.routes = deepClone(state.rawRoutes);
@@ -233,49 +424,153 @@ function normalizeRouteDatasets() {
     routes.sort((a, b) => String(a.route_id).localeCompare(String(b.route_id)));
     const groupId = `merged:${key}`;
     const colorRoute = state.mergeColorSide === "second" ? routes[routes.length - 1] : routes[0];
+    const memberRouteIds = routes.map((route) => normalizeRouteId(route.route_id)).filter((routeId) => routeId);
+
     mergedCatalog.push({
       route_id: groupId,
       route_short_name: routes[0].route_short_name || "",
       route_long_name: buildMergedLabel(routes),
       route_color: colorRoute.route_color,
       route_text_color: colorRoute.route_text_color || "",
-      member_route_ids: routes.map((route) => route.route_id),
+      color_source_route_id: normalizeRouteId(colorRoute.route_id),
+      member_route_ids: memberRouteIds,
     });
     mergedById[groupId] = mergedCatalog[mergedCatalog.length - 1];
 
-    groupToRoutes[groupId] = routes.map((route) => route.route_id);
+    groupToRoutes[groupId] = memberRouteIds;
     routes.forEach((route) => {
-      routeToGroup[route.route_id] = groupId;
+      const routeId = normalizeRouteId(route.route_id);
+      if (routeId) {
+        routeToGroup[routeId] = groupId;
+      }
     });
   }
 
-  const mergedRoutes = deepClone(state.rawRoutes);
-  mergedRoutes.features.forEach((feature) => {
-    const sourceRouteId = feature.properties?.route_id;
-    const groupId = routeToGroup[sourceRouteId] || sourceRouteId;
-    const mergedItem = mergedById[groupId];
-    feature.properties = {
-      ...feature.properties,
-      source_route_id: sourceRouteId,
-      route_id: groupId,
-      route_color: mergedItem?.route_color || feature.properties?.route_color,
-      route_short_name: mergedItem?.route_short_name || feature.properties?.route_short_name,
-      route_long_name: mergedItem?.route_long_name || feature.properties?.route_long_name,
-    };
-  });
+  const routeFeaturesByRouteId = {};
+  for (const feature of state.rawRoutes.features || []) {
+    const rid = normalizeRouteId(feature?.properties?.route_id);
+    if (rid) {
+      routeFeaturesByRouteId[rid] = feature;
+    }
+  }
 
-  const mergedConnections = deepClone(state.rawStopConnections);
-  mergedConnections.features.forEach((feature) => {
-    const sourceRouteId = feature.properties?.route_id;
-    const groupId = routeToGroup[sourceRouteId] || sourceRouteId;
-    const mergedItem = mergedById[groupId];
-    feature.properties = {
-      ...feature.properties,
-      source_route_id: sourceRouteId,
-      route_id: groupId,
-      route_color: mergedItem?.route_color || feature.properties?.route_color,
-    };
-  });
+  // Fallback: some GTFS feeds have no shapes/routes line geometry.
+  // In that case, use stop-connection geometries as route geometry source.
+  for (const feature of state.rawStopConnections.features || []) {
+    const rid = normalizeRouteId(feature?.properties?.route_id);
+    if (rid && !routeFeaturesByRouteId[rid]) {
+      routeFeaturesByRouteId[rid] = {
+        type: "Feature",
+        geometry: deepClone(feature.geometry),
+        properties: {
+          ...(feature.properties || {}),
+          route_id: rid,
+        },
+      };
+    }
+  }
+
+  const mergedRouteFeatures = [];
+  for (const mergedItem of mergedCatalog) {
+    const memberRouteIds = mergedItem.member_route_ids || [];
+    const memberFeatures = memberRouteIds.map((rid) => routeFeaturesByRouteId[normalizeRouteId(rid)]).filter(Boolean);
+    if (memberFeatures.length === 0) {
+      continue;
+    }
+
+    const baseFeature = deepClone(memberFeatures[0]);
+    let geometry = baseFeature.geometry;
+
+    if (memberFeatures.length >= 2) {
+      const lineA = pickLongestLine(memberFeatures[0].geometry);
+      const lineB = pickLongestLine(memberFeatures[1].geometry);
+      const centerLine = buildCenterLine(lineA, lineB);
+      if (centerLine.length >= 2) {
+        geometry = { type: "LineString", coordinates: centerLine };
+      }
+    }
+
+    mergedRouteFeatures.push({
+      type: "Feature",
+      geometry,
+      properties: {
+        ...baseFeature.properties,
+        route_id: mergedItem.route_id,
+        route_color:
+          routeFeaturesByRouteId[mergedItem.color_source_route_id]?.properties?.route_color || mergedItem.route_color,
+        route_short_name: mergedItem.route_short_name,
+        route_long_name: mergedItem.route_long_name,
+        member_route_ids: memberRouteIds,
+      },
+    });
+  }
+
+  const mergedRoutes = { type: "FeatureCollection", features: mergedRouteFeatures };
+
+  if (mergedRoutes.features.length === 0) {
+    for (const mergedItem of mergedCatalog) {
+      const memberRouteIds = mergedItem.member_route_ids || [];
+      const firstFeature = memberRouteIds.map((rid) => routeFeaturesByRouteId[normalizeRouteId(rid)]).find(Boolean);
+      if (!firstFeature) {
+        continue;
+      }
+      mergedRoutes.features.push({
+        type: "Feature",
+        geometry: deepClone(firstFeature.geometry),
+        properties: {
+          ...firstFeature.properties,
+          route_id: mergedItem.route_id,
+          route_color:
+            routeFeaturesByRouteId[mergedItem.color_source_route_id]?.properties?.route_color || mergedItem.route_color,
+          route_short_name: mergedItem.route_short_name,
+          route_long_name: mergedItem.route_long_name,
+          member_route_ids: memberRouteIds,
+        },
+      });
+    }
+  }
+
+  const connectionFeaturesByRouteId = {};
+  for (const feature of state.rawStopConnections.features || []) {
+    const rid = normalizeRouteId(feature?.properties?.route_id);
+    if (rid) {
+      connectionFeaturesByRouteId[rid] = feature;
+    }
+  }
+
+  const mergedConnectionFeatures = [];
+  for (const mergedItem of mergedCatalog) {
+    const memberRouteIds = mergedItem.member_route_ids || [];
+    const memberFeatures = memberRouteIds.map((rid) => connectionFeaturesByRouteId[normalizeRouteId(rid)]).filter(Boolean);
+    if (memberFeatures.length === 0) {
+      continue;
+    }
+
+    const baseFeature = deepClone(memberFeatures[0]);
+    let geometry = baseFeature.geometry;
+    if (memberFeatures.length >= 2) {
+      const lineA = pickLongestLine(memberFeatures[0].geometry);
+      const lineB = pickLongestLine(memberFeatures[1].geometry);
+      const centerLine = buildCenterLine(lineA, lineB);
+      if (centerLine.length >= 2) {
+        geometry = { type: "LineString", coordinates: centerLine };
+      }
+    }
+
+    mergedConnectionFeatures.push({
+      type: "Feature",
+      geometry,
+      properties: {
+        ...baseFeature.properties,
+        route_id: mergedItem.route_id,
+        route_color:
+          routeFeaturesByRouteId[mergedItem.color_source_route_id]?.properties?.route_color || mergedItem.route_color,
+        member_route_ids: memberRouteIds,
+      },
+    });
+  }
+
+  const mergedConnections = { type: "FeatureCollection", features: mergedConnectionFeatures };
 
   state.routes = mergedRoutes;
   state.routeCatalog = mergedCatalog;
@@ -325,7 +620,7 @@ function createLayersIfNeeded() {
       paint: {
         "line-color": "#000000",
         "line-width": 8,
-        "line-opacity": 0.01,
+        "line-opacity": 0,
       },
       filter: ["in", ["get", "route_id"], ["literal", Array.from(state.visibleRouteIds)]],
     }, "routes-line");
@@ -367,7 +662,7 @@ function createLayersIfNeeded() {
       paint: {
         "line-color": "#000000",
         "line-width": 7,
-        "line-opacity": 0.01,
+        "line-opacity": 0,
       },
       layout: { visibility: state.showStopConnections ? "visible" : "none" },
     }, "stop-connections-line");
@@ -402,6 +697,7 @@ function updateRouteFilter() {
   if (map.getLayer("stop-connections-line-hit")) {
     map.setFilter("stop-connections-line-hit", ["in", ["get", "route_id"], ["literal", Array.from(state.visibleRouteIds)]]);
   }
+  updateDebugOverlay();
 }
 
 function renderRouteList() {
@@ -470,6 +766,7 @@ async function reloadAllData() {
 
   normalizeRouteDatasets();
   rebuildVisibleRouteIds();
+  applyMergeModeVisualPolicy();
 
   if (state.visibleRouteIds.size === 0) {
     state.routeCatalog.forEach((r) => state.visibleRouteIds.add(r.route_id));
@@ -478,6 +775,7 @@ async function reloadAllData() {
   createLayersIfNeeded();
   refreshOverlayLayers();
   renderRouteList();
+  updateDebugOverlay();
   rtStatus.textContent = vehiclesPayload.status?.last_error
     ? `RT Error: ${vehiclesPayload.status.last_error}`
     : `RT更新: ${vehiclesPayload.status?.last_update_unix || "未取得"}`;
@@ -536,6 +834,7 @@ function wireActions() {
     mergeColorSideSelect.disabled = !state.mergeRoundTrip;
     normalizeRouteDatasets();
     rebuildVisibleRouteIds();
+    applyMergeModeVisualPolicy();
     refreshOverlayLayers();
     renderRouteList();
     saveUiState();
@@ -567,6 +866,9 @@ function wireActions() {
   });
 
   document.getElementById("toggleStopConnectionsBtn").addEventListener("click", () => {
+    if (state.mergeRoundTrip) {
+      return;
+    }
     state.showStopConnections = !state.showStopConnections;
     map.setLayoutProperty(
       "stop-connections-line",
@@ -628,6 +930,7 @@ function wireActions() {
 }
 
 map.on("load", async () => {
+  ensureDebugOverlay();
   refreshOverlayLayers();
   wireActions();
   rtStatus.textContent = "ベースマップを表示中...";
