@@ -11,7 +11,7 @@ function resolveInitialStyle(styleUrl) {
   if (styleUrl && candidates.includes(styleUrl)) {
     return styleUrl;
   }
-  return BASEMAP_STYLES.liberty;
+  return BASEMAP_STYLES.bright;
 }
 
 const initialStyle = resolveInitialStyle(savedState.baseMapStyle);
@@ -141,18 +141,11 @@ function refreshOverlayLayers() {
 
 function applyMergeModeVisualPolicy() {
   if (state.mergeRoundTrip) {
-    state.showStopConnections = false;
     if (map.getLayer("routes-line")) {
       map.setLayoutProperty("routes-line", "visibility", "visible");
     }
     if (map.getLayer("routes-line-hit")) {
       map.setLayoutProperty("routes-line-hit", "visibility", "visible");
-    }
-    if (map.getLayer("stop-connections-line")) {
-      map.setLayoutProperty("stop-connections-line", "visibility", "none");
-    }
-    if (map.getLayer("stop-connections-line-hit")) {
-      map.setLayoutProperty("stop-connections-line-hit", "visibility", "none");
     }
   } else {
     if (map.getLayer("routes-line")) {
@@ -164,10 +157,8 @@ function applyMergeModeVisualPolicy() {
   }
 
   if (toggleStopConnectionsBtn) {
-    toggleStopConnectionsBtn.disabled = state.mergeRoundTrip;
-    toggleStopConnectionsBtn.textContent = state.mergeRoundTrip
-      ? "停留所連結線 ON/OFF（統合中は無効）"
-      : "停留所連結線 ON/OFF";
+    toggleStopConnectionsBtn.disabled = false;
+    toggleStopConnectionsBtn.textContent = "停留所連結線 ON/OFF";
   }
   updateDebugOverlay();
 }
@@ -661,7 +652,7 @@ function createLayersIfNeeded() {
       source: "stop-connections",
       paint: {
         "line-color": "#000000",
-        "line-width": 7,
+        "line-width": 10,
         "line-opacity": 0,
       },
       layout: { visibility: state.showStopConnections ? "visible" : "none" },
@@ -866,9 +857,6 @@ function wireActions() {
   });
 
   document.getElementById("toggleStopConnectionsBtn").addEventListener("click", () => {
-    if (state.mergeRoundTrip) {
-      return;
-    }
     state.showStopConnections = !state.showStopConnections;
     map.setLayoutProperty(
       "stop-connections-line",
