@@ -172,6 +172,32 @@ button:hover {
   margin-bottom: 8px;
 }
 
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.control-group label {
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
+.width-control-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 84px;
+  gap: 8px;
+}
+
+.width-control-row input[type="range"] {
+  padding: 8px 0;
+}
+
+.width-control-row input[type="number"] {
+  width: 84px;
+}
+
 .checkbox-row {
   display: flex;
   align-items: center;
