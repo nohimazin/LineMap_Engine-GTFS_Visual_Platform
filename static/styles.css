@@ -75,6 +75,13 @@ body {
   font-size: 0.85rem;
 }
 
+.app-version {
+  margin: -6px 0 4px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  letter-spacing: 0.03em;
+}
+
 .card {
   background: rgba(255, 255, 255, 0.96);
   border: 1px solid var(--border);
