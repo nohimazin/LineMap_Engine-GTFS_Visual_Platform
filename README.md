@@ -16,7 +16,7 @@ GTFS / GTFS-RT を地図上に可視化する FastAPI + MapLibre ベースのWeb
 
 - Backend: FastAPI
 - Frontend: MapLibre GL JS
-- Base Map: OpenFreeMap (Liberty style)
+- Base Map: OpenFreeMap (Bright default, Liberty / Positron selectable)
 - Data Store: メモリ + SQLite（`data/linemap.db`）
 - Data Format: GeoJSON
 
@@ -44,8 +44,10 @@ uvicorn app.main:app --reload
 - `GET /routes`: 路線GeoJSON
 - `GET /route_catalog`: 路線一覧
 - `GET /stops`: 停留所GeoJSON
+- `GET /stop_connections`: 停留所連結線GeoJSON
 - `GET /vehicles`: 車両位置（GeoJSON + ステータス）
 - `POST /settings/gtfs_rt`: GTFS-RT URL/間隔設定
+- `GET /health`: ヘルスチェック
 
 ## 注意
 
