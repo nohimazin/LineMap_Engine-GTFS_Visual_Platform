@@ -1,6 +1,6 @@
 const savedView = JSON.parse(localStorage.getItem("linemap:view") || "null");
 const savedState = JSON.parse(localStorage.getItem("linemap:state") || "{}");
-const UI_BUILD_VERSION = "2026-04-25-stop-popup-fix-2";
+const UI_BUILD_VERSION = "2026-04-25-stop-popup-fix-4";
 const BASEMAP_STYLES = {
   liberty: "https://tiles.openfreemap.org/styles/liberty",
   bright: "https://tiles.openfreemap.org/styles/bright",
@@ -53,6 +53,7 @@ const routeList = document.getElementById("routeList");
 const routeSearchInput = document.getElementById("routeSearchInput");
 const uploadResult = document.getElementById("uploadResult");
 const rtStatus = document.getElementById("rtStatus");
+const appVersion = document.getElementById("appVersion");
 const mapStyleSelect = document.getElementById("mapStyleSelect");
 const mergeRoundTripToggle = document.getElementById("mergeRoundTripToggle");
 const mergeColorSideSelect = document.getElementById("mergeColorSideSelect");
@@ -60,6 +61,10 @@ const stopConnectionsWidthRange = document.getElementById("stopConnectionsWidthR
 const stopConnectionsWidthInput = document.getElementById("stopConnectionsWidthInput");
 const toggleStopConnectionsBtn = document.getElementById("toggleStopConnectionsBtn");
 let debugOverlay = null;
+
+if (appVersion) {
+  appVersion.textContent = `Version: ${UI_BUILD_VERSION}`;
+}
 
 function getLayerVisibility(layerId) {
   if (!map.getLayer(layerId)) return "missing";
@@ -805,7 +810,7 @@ function buildStopPopupHtml(properties) {
   const routes = Array.isArray(properties?.routes) ? properties.routes.filter(Boolean) : [];
   const times = Array.isArray(properties?.times) ? properties.times.filter(Boolean) : [];
 
-  const lines = [`<b>バス停名: ${title}</b>`, `stop_id: ${stopId}`];
+  const lines = [`<b>バス停名: ${title} (stop_id: ${stopId || "不明"})</b>`, `stop_id: ${stopId}`];
   if (stopCode) {
     lines.push(`標柱コード: ${stopCode}`);
   }
@@ -821,6 +826,31 @@ function buildStopPopupHtml(properties) {
   return lines.join("<br/>");
 }
 
+function buildStopPopupText(properties) {
+  const stopName = normalizeDisplayText(properties?.stop_name);
+  const stopCode = normalizeDisplayText(properties?.stop_code);
+  const stopId = normalizeDisplayText(properties?.stop_id);
+  const parentStation = normalizeDisplayText(properties?.parent_station);
+  const title = stopName || stopCode || `バス停 ${stopId || "不明"}`;
+  const routes = Array.isArray(properties?.routes) ? properties.routes.filter(Boolean) : [];
+  const times = Array.isArray(properties?.times) ? properties.times.filter(Boolean) : [];
+
+  const lines = [`バス停名: ${title} (stop_id: ${stopId || "不明"})`, `stop_id: ${stopId}`];
+  if (stopCode) {
+    lines.push(`標柱コード: ${stopCode}`);
+  }
+  if (parentStation) {
+    lines.push(`親停留所: ${parentStation}`);
+  }
+  if (routes.length > 0) {
+    lines.push(`通過路線: ${routes.slice(0, 5).join(", ")}`);
+  }
+  if (times.length > 0) {
+    lines.push(`時刻(簡易): ${times.slice(0, 5).join(", ")}`);
+  }
+  return lines.join("\n");
+}
+
 function resolveStopPropertiesById(stopId, fallbackProperties) {
   const normalizedStopId = normalizeDisplayText(stopId);
   if (!normalizedStopId) {
@@ -831,9 +861,34 @@ function resolveStopPropertiesById(stopId, fallbackProperties) {
     (feature) => normalizeDisplayText(feature?.properties?.stop_id) === normalizedStopId,
   );
   return {
-    ...(matchedFeature?.properties || {}),
     ...(fallbackProperties || {}),
+    ...(matchedFeature?.properties || {}),
   };
+}
+
+async function resolveStopPropertiesWithApiFallback(stopId, fallbackProperties) {
+  const resolved = resolveStopPropertiesById(stopId, fallbackProperties);
+  const hasName = normalizeDisplayText(resolved?.stop_name);
+  if (hasName) {
+    return resolved;
+  }
+
+  try {
+    const stopsPayload = await api("/stops");
+    const fallbackFeature = (stopsPayload?.features || []).find(
+      (feature) => normalizeDisplayText(feature?.properties?.stop_id) === normalizeDisplayText(stopId),
+    );
+    if (fallbackFeature?.properties) {
+      return {
+        ...(fallbackProperties || {}),
+        ...fallbackFeature.properties,
+      };
+    }
+  } catch (err) {
+    console.warn("停留所情報の再取得に失敗しました", err);
+  }
+
+  return resolved;
 }
 
 async function reloadAllData() {
@@ -1004,14 +1059,14 @@ function wireActions() {
       .addTo(map);
   });
 
-  map.on("click", "stops-circle", (e) => {
+  map.on("click", "stops-circle", async (e) => {
     const f = e.features?.[0];
     if (!f) return;
     const p = f.properties || {};
-    const resolved = resolveStopPropertiesById(p.stop_id, p);
+    const resolved = await resolveStopPropertiesWithApiFallback(p.stop_id, p);
     new maplibregl.Popup()
       .setLngLat(e.lngLat)
-      .setHTML(buildStopPopupHtml(resolved))
+      .setText(buildStopPopupText(resolved))
       .addTo(map);
   });
 
