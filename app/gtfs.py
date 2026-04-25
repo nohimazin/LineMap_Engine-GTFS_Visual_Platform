@@ -22,8 +22,20 @@ def _read_csv_from_zip(archive: zipfile.ZipFile, name: str) -> list[dict[str, st
 
     try:
         with archive.open(member_name) as raw:
-            decoded = io.TextIOWrapper(raw, encoding="utf-8-sig")
-            return list(csv.DictReader(decoded))
+            payload = raw.read()
+
+        # GTFS feeds in Japan are often encoded in CP932/Shift_JIS.
+        # Try UTF-8 first, then fallback encodings for compatibility.
+        for encoding in ("utf-8-sig", "cp932", "shift_jis"):
+            try:
+                text = payload.decode(encoding)
+                return list(csv.DictReader(io.StringIO(text)))
+            except UnicodeDecodeError:
+                continue
+
+        # As a last resort, decode with replacement to keep parser resilient.
+        text = payload.decode("utf-8", errors="replace")
+        return list(csv.DictReader(io.StringIO(text)))
     except KeyError:
         return []
 
@@ -180,10 +192,41 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
 
     stop_coords: dict[str, list[float]] = {}
     stop_names: dict[str, str] = {}
+    stop_codes: dict[str, str] = {}
+    stop_parent_station: dict[str, str] = {}
+    stop_meta: dict[str, dict[str, str]] = {}
+
+    for row in stops_rows:
+        stop_id = row.get("stop_id", "").strip()
+        if not stop_id:
+            continue
+        stop_meta[stop_id] = {
+            "stop_name": row.get("stop_name", "").strip(),
+            "stop_desc": row.get("stop_desc", "").strip(),
+            "stop_code": row.get("stop_code", "").strip(),
+            "parent_station": row.get("parent_station", "").strip(),
+        }
+
+    def _resolve_stop_display_name(stop_id: str) -> str:
+        seen: set[str] = set()
+        current = stop_id
+        while current and current not in seen:
+            seen.add(current)
+            meta = stop_meta.get(current, {})
+            candidate = meta.get("stop_name", "") or meta.get("stop_desc", "") or meta.get("stop_code", "")
+            if candidate:
+                return candidate
+            current = meta.get("parent_station", "")
+        return stop_id
+
     for row in stops_rows:
         stop_id = row.get("stop_id", "").strip()
         stop_lat = row.get("stop_lat", "").strip()
         stop_lon = row.get("stop_lon", "").strip()
+        stop_name = row.get("stop_name", "").strip()
+        stop_desc = row.get("stop_desc", "").strip()
+        stop_code = row.get("stop_code", "").strip()
+        parent_station = row.get("parent_station", "").strip()
         if not stop_id or not stop_lat or not stop_lon:
             continue
         try:
@@ -192,7 +235,9 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
         except ValueError:
             continue
         stop_coords[stop_id] = [lon, lat]
-        stop_names[stop_id] = row.get("stop_name", "").strip()
+        stop_names[stop_id] = stop_name or stop_desc or stop_code or _resolve_stop_display_name(stop_id)
+        stop_codes[stop_id] = stop_code
+        stop_parent_station[stop_id] = parent_station
 
     routes: dict[str, dict[str, str]] = {}
     trip_to_shape: dict[str, str] = {}
@@ -367,6 +412,8 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
                 "properties": {
                     "stop_id": stop_id,
                     "stop_name": stop_names.get(stop_id, ""),
+                    "stop_code": stop_codes.get(stop_id, ""),
+                    "parent_station": stop_parent_station.get(stop_id, ""),
                     "routes": [],
                     "times": [],
                 },

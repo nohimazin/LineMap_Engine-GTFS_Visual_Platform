@@ -1,5 +1,6 @@
 const savedView = JSON.parse(localStorage.getItem("linemap:view") || "null");
 const savedState = JSON.parse(localStorage.getItem("linemap:state") || "{}");
+const UI_BUILD_VERSION = "2026-04-25-stop-popup-fix-2";
 const BASEMAP_STYLES = {
   liberty: "https://tiles.openfreemap.org/styles/liberty",
   bright: "https://tiles.openfreemap.org/styles/bright",
@@ -78,6 +79,7 @@ function updateDebugOverlay() {
   const node = ensureDebugOverlay();
   const lines = [
     "Debug Overlay",
+    `uiVersion: ${UI_BUILD_VERSION}`,
     `mergeRoundTrip: ${state.mergeRoundTrip ? "ON" : "OFF"}`,
     `mergeColorSide: ${state.mergeColorSide}`,
     `visibleRouteIds: ${state.visibleRouteIds.size}`,
@@ -784,6 +786,56 @@ function getRouteDisplayName(routeId) {
   return name || routeId;
 }
 
+function normalizeDisplayText(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  const lower = text.toLowerCase();
+  if (lower === "null" || lower === "none" || lower === "nan" || text === "-") {
+    return "";
+  }
+  return text;
+}
+
+function buildStopPopupHtml(properties) {
+  const stopName = normalizeDisplayText(properties?.stop_name);
+  const stopCode = normalizeDisplayText(properties?.stop_code);
+  const stopId = normalizeDisplayText(properties?.stop_id);
+  const parentStation = normalizeDisplayText(properties?.parent_station);
+  const title = stopName || stopCode || `バス停 ${stopId || "不明"}`;
+  const routes = Array.isArray(properties?.routes) ? properties.routes.filter(Boolean) : [];
+  const times = Array.isArray(properties?.times) ? properties.times.filter(Boolean) : [];
+
+  const lines = [`<b>バス停名: ${title}</b>`, `stop_id: ${stopId}`];
+  if (stopCode) {
+    lines.push(`標柱コード: ${stopCode}`);
+  }
+  if (parentStation) {
+    lines.push(`親停留所: ${parentStation}`);
+  }
+  if (routes.length > 0) {
+    lines.push(`通過路線: ${routes.slice(0, 5).join(", ")}`);
+  }
+  if (times.length > 0) {
+    lines.push(`時刻(簡易): ${times.slice(0, 5).join(", ")}`);
+  }
+  return lines.join("<br/>");
+}
+
+function resolveStopPropertiesById(stopId, fallbackProperties) {
+  const normalizedStopId = normalizeDisplayText(stopId);
+  if (!normalizedStopId) {
+    return fallbackProperties || {};
+  }
+
+  const matchedFeature = (state.stops.features || []).find(
+    (feature) => normalizeDisplayText(feature?.properties?.stop_id) === normalizedStopId,
+  );
+  return {
+    ...(matchedFeature?.properties || {}),
+    ...(fallbackProperties || {}),
+  };
+}
+
 async function reloadAllData() {
   const [routes, routeCatalog, stops, stopConnections, vehiclesPayload] = await Promise.all([
     api("/routes"),
@@ -956,9 +1008,10 @@ function wireActions() {
     const f = e.features?.[0];
     if (!f) return;
     const p = f.properties || {};
+    const resolved = resolveStopPropertiesById(p.stop_id, p);
     new maplibregl.Popup()
       .setLngLat(e.lngLat)
-      .setHTML(`<b>${p.stop_name || "停留所"}</b><br/>stop_id: ${p.stop_id}`)
+      .setHTML(buildStopPopupHtml(resolved))
       .addTo(map);
   });
 
