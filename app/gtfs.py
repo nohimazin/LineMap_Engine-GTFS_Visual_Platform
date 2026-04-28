@@ -404,6 +404,31 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
             )
 
     stop_features: list[dict[str, Any]] = []
+    
+    # 停留所ごとの通過路線・発時刻を辞書で事前計算
+    stop_to_routes: dict[str, set[str]] = defaultdict(set)
+    stop_to_times: dict[str, set[str]] = defaultdict(set)
+    
+    # Trip -> Stop時刻マッピングを事前構築（効率改善）
+    trip_stop_times_map: dict[tuple[str, str], str] = {}  # (trip_id, stop_id) -> arrival_time
+    for row in stop_times_rows:
+        trip_id = row.get("trip_id", "").strip()
+        stop_id = row.get("stop_id", "").strip()
+        arrival_time = row.get("arrival_time", "").strip()
+        if trip_id and stop_id and arrival_time:
+            trip_stop_times_map[(trip_id, stop_id)] = arrival_time
+    
+    for trip_id, stop_times in trip_stop_times.items():
+        route_id = trip_to_route.get(trip_id, "")
+        if not route_id:
+            continue
+        for sequence, stop_id in stop_times:
+            stop_to_routes[stop_id].add(route_id)
+            # 時刻を取得
+            arrival_time = trip_stop_times_map.get((trip_id, stop_id))
+            if arrival_time:
+                stop_to_times[stop_id].add(arrival_time)
+    
     for stop_id, coord in stop_coords.items():
         stop_features.append(
             {
@@ -414,8 +439,8 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
                     "stop_name": stop_names.get(stop_id, ""),
                     "stop_code": stop_codes.get(stop_id, ""),
                     "parent_station": stop_parent_station.get(stop_id, ""),
-                    "routes": [],
-                    "times": [],
+                    "routes": sorted(list(stop_to_routes.get(stop_id, set()))),
+                    "times": sorted(list(stop_to_times.get(stop_id, set())))[:5],  # 最初の5つまで
                 },
             }
         )

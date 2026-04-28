@@ -1,6 +1,6 @@
 const savedView = JSON.parse(localStorage.getItem("linemap:view") || "null");
 const savedState = JSON.parse(localStorage.getItem("linemap:state") || "{}");
-const UI_BUILD_VERSION = "2026-04-25-stop-popup-fix-5";
+const UI_BUILD_VERSION = "2026-04-28-ui-settings-v2";
 const BASEMAP_STYLES = {
   liberty: "https://tiles.openfreemap.org/styles/liberty",
   bright: "https://tiles.openfreemap.org/styles/bright",
@@ -148,6 +148,55 @@ function applyStopConnectionsLineWidth() {
   }
 }
 
+function createVehicleArrowIcon() {
+  /**
+   * 車両用の矢印アイコンをSVGで生成
+   * 返り値: ImageData形式で、map.addImage()で登録可能
+   */
+  const size = 32;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  
+  // 背景を透明に
+  ctx.clearRect(0, 0, size, size);
+  
+  // 矢印を描画（上向き）
+  ctx.fillStyle = '#dd5c23';
+  ctx.strokeStyle = '#fff4de';
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  
+  // 矢印の三角形
+  const arrowPoints = [
+    [size / 2, 4],        // 先端
+    [size - 6, size - 4], // 右下
+    [size / 2, size - 10], // 中点
+    [6, size - 4],        // 左下
+  ];
+  
+  ctx.beginPath();
+  ctx.moveTo(arrowPoints[0][0], arrowPoints[0][1]);
+  ctx.lineTo(arrowPoints[1][0], arrowPoints[1][1]);
+  ctx.lineTo(arrowPoints[2][0], arrowPoints[2][1]);
+  ctx.lineTo(arrowPoints[3][0], arrowPoints[3][1]);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  
+  // 白いハイライト（中央）
+  ctx.fillStyle = 'rgba(255, 244, 222, 0.6)';
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2 + 2, 3, 0, Math.PI * 2);
+  ctx.fill();
+  
+  return canvas.getImageData(0, 0, size, size);
+}
+
+
 function applyRouteLineWidth() {
   const routeLineWidth = state.mergeRoundTrip ? state.stopConnectionsLineWidth : 3;
   if (map.getLayer("routes-line")) {
@@ -180,6 +229,14 @@ function applyLayerVisibility() {
 }
 
 function refreshOverlayLayers() {
+  // 矢印アイコンをマップに登録（既に登録されていないか確認）
+  if (!map.hasImage('vehicle-arrow')) {
+    const arrowImageData = createVehicleArrowIcon();
+    if (arrowImageData) {
+      map.addImage('vehicle-arrow', arrowImageData, { sdf: false });
+    }
+  }
+  
   createLayersIfNeeded();
   syncSourcesData();
   updateRouteFilter();
@@ -714,15 +771,25 @@ function createLayersIfNeeded() {
     map.addSource("vehicles", { type: "geojson", data: state.vehicles });
     map.addLayer({
       id: "vehicles-symbol",
-      type: "circle",
+      type: "symbol",
       source: "vehicles",
-      paint: {
-        "circle-radius": 6,
-        "circle-color": "#dd5c23",
-        "circle-stroke-color": "#fff4de",
-        "circle-stroke-width": 2,
+      layout: {
+        "icon-image": "vehicle-arrow",
+        "icon-size": 1.2,
+        "icon-rotate": ["coalesce", ["get", "bearing"], 0],
+        "icon-allow-overlap": true,
+        "text-field": ["get", "vehicle_id"],
+        "text-font": ["Open Sans Regular"],
+        "text-size": 9,
+        "text-offset": [0, 1.8],
+        "text-anchor": "top",
+        visibility: state.showVehicles ? "visible" : "none",
       },
-      layout: { visibility: state.showVehicles ? "visible" : "none" },
+      paint: {
+        "text-color": "#333",
+        "text-halo-color": "#fff",
+        "text-halo-width": 0.8,
+      },
     });
   }
 }
@@ -1042,10 +1109,48 @@ function wireActions() {
   });
 
   document.getElementById("exportPngBtn").addEventListener("click", () => {
-    const link = document.createElement("a");
-    link.href = map.getCanvas().toDataURL("image/png");
-    link.download = `linemap-${Date.now()}.png`;
-    link.click();
+    const exportWithQuality = async () => {
+      // デバッグオーバーレイを一時的に隠す
+      const debugOverlay = document.querySelector('.debug-overlay');
+      const wasVisible = debugOverlay && debugOverlay.style.display !== 'none';
+      if (debugOverlay) {
+        debugOverlay.style.display = 'none';
+      }
+
+      try {
+        // キャンバスの寸法を取得
+        const canvas = map.getCanvas();
+        const originalWidth = canvas.width;
+        const originalHeight = canvas.height;
+
+        // レンダリングを完了させるまで待機
+        await new Promise((resolve) => {
+          const checkIdle = () => {
+            if (map.isStyleLoaded() && map.areTilesLoaded?.()) {
+              resolve();
+            } else {
+              setTimeout(checkIdle, 100);
+            }
+          };
+          checkIdle();
+        });
+
+        // 現在の表示状態でスクリーンショット取得
+        const dataUrl = canvas.toDataURL('image/png');
+        const link = document.createElement('a');
+        link.href = dataUrl;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+        link.download = `linemap-${timestamp}.png`;
+        link.click();
+      } finally {
+        // デバッグオーバーレイを復元
+        if (debugOverlay && wasVisible) {
+          debugOverlay.style.display = '';
+        }
+      }
+    };
+
+    exportWithQuality();
   });
 
   map.on("click", "routes-line-hit", (e) => {
@@ -1080,6 +1185,33 @@ function wireActions() {
       .setHTML(
         `<b>停留所連結線</b><br/>路線名: ${routeName}<br/>route_id: ${p.route_id || ""}<br/>trip_id: ${p.trip_id || ""}`,
       )
+      .addTo(map);
+  });
+
+  map.on("click", "vehicles-symbol", (e) => {
+    const f = e.features?.[0];
+    if (!f) return;
+    const p = f.properties || {};
+    const vehicleId = normalizeDisplayText(p.vehicle_id) || "不明";
+    const tripId = normalizeDisplayText(p.trip_id) || "不明";
+    const routeName = getRouteDisplayName(p.route_id) || "不明";
+    const bearing = p.bearing ? `${p.bearing.toFixed(1)}°` : "不明";
+    const speed = p.speed ? `${p.speed.toFixed(1)} m/s` : "不明";
+    const timestamp = p.timestamp ? new Date(p.timestamp * 1000).toLocaleTimeString('ja-JP') : "不明";
+    
+    const lines = [
+      `<b>車両情報</b>`,
+      `ID: ${vehicleId}`,
+      `路線: ${routeName}`,
+      `trip_id: ${tripId}`,
+      `方位: ${bearing}`,
+      `速度: ${speed}`,
+      `更新時刻: ${timestamp}`,
+    ];
+    
+    new maplibregl.Popup()
+      .setLngLat(e.lngLat)
+      .setHTML(lines.join("<br/>"))
       .addTo(map);
   });
 

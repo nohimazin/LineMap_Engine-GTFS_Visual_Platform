@@ -124,6 +124,35 @@ body {
   min-width: 0;
 }
 
+.card-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.card-group > h2 {
+  margin-bottom: 12px;
+}
+
+.card-subsection {
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.card-subsection:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.card-subsection h3 {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 input,
 button,
 select {
@@ -358,6 +387,15 @@ button:hover {
 
   .card-header input {
     width: 100%;
+  }
+
+  .card-subsection {
+    padding: 8px 0;
+  }
+
+  .card-subsection h3 {
+    font-size: 0.75rem;
+    margin-bottom: 6px;
   }
 
   .action-buttons-row {

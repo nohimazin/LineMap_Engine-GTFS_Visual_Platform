@@ -12,7 +12,7 @@
       rel="stylesheet"
     />
     <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260425a" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260428a" />
   </head>
   <body>
     <div class="background-pattern" aria-hidden="true"></div>
@@ -31,57 +31,70 @@
           </select>
         </section>
 
-        <section class="card">
-          <h2>GTFSアップロード</h2>
-          <input type="file" id="gtfsZipInput" accept=".zip" />
-          <button id="uploadBtn">GTFSを読み込む</button>
-          <p id="uploadResult" class="hint"></p>
-        </section>
-
-        <section class="card">
-          <h2>GTFS-RT設定</h2>
-          <input id="rtUrlInput" placeholder="https://example.com/vehiclePositions.pb" />
-          <div class="inline-controls rt-interval-row">
-            <input id="rtIntervalInput" type="number" min="5" max="60" value="10" />
-            <span>秒</span>
+        <section class="card card-group">
+          <h2>📊 データ入力</h2>
+          <div class="card-subsection">
+            <h3>GTFSアップロード</h3>
+            <input type="file" id="gtfsZipInput" accept=".zip" />
+            <button id="uploadBtn">GTFSを読み込む</button>
+            <p id="uploadResult" class="hint"></p>
           </div>
-          <button id="rtSaveBtn">RT設定を保存</button>
-          <p id="rtStatus" class="hint"></p>
+          <div class="card-subsection">
+            <h3>GTFS-RT設定</h3>
+            <input id="rtUrlInput" placeholder="https://example.com/vehiclePositions.pb" />
+            <div class="inline-controls rt-interval-row">
+              <input id="rtIntervalInput" type="number" min="5" max="60" value="10" />
+              <span>秒</span>
+            </div>
+            <button id="rtSaveBtn">RT設定を保存</button>
+            <p id="rtStatus" class="hint"></p>
+          </div>
         </section>
 
         <section class="card grow">
           <div class="card-header">
-            <h2>路線一覧</h2>
+            <h2>🛣️ 路線一覧</h2>
             <input id="routeSearchInput" placeholder="路線名検索" />
           </div>
           <div id="routeList" class="route-list"></div>
         </section>
 
-        <section class="card">
-          <h2>表示操作</h2>
-          <div class="merge-options">
+        <section class="card card-group">
+          <h2>⚙️ 表示設定</h2>
+          <div class="card-subsection">
+            <h3>往復路線の統合</h3>
             <label class="checkbox-row">
               <input id="mergeRoundTripToggle" type="checkbox" />
-              <span>往復路線を統合表示</span>
+              <span>統合表示を有効にする</span>
             </label>
             <select id="mergeColorSideSelect">
               <option value="first">統合時カラー: route_idが小さい側</option>
               <option value="second">統合時カラー: route_idが大きい側</option>
             </select>
           </div>
-          <div class="control-group">
-            <label for="stopConnectionsWidthInput">停留所連結線の太さ</label>
+          <div class="card-subsection">
+            <h3>停留所連結線</h3>
+            <label for="stopConnectionsWidthInput">線の太さ</label>
             <div class="inline-controls width-control-row">
-                <input id="stopConnectionsWidthRange" type="range" min="1" max="20" step="0.05" />
-                <input id="stopConnectionsWidthInput" type="number" min="1" max="20" step="0.05" />
+              <input id="stopConnectionsWidthRange" type="range" min="1" max="20" step="0.05" />
+              <input id="stopConnectionsWidthInput" type="number" min="1" max="20" step="0.05" />
             </div>
           </div>
+        </section>
+
+        <section class="card">
+          <h2>👁️ レイヤー表示</h2>
           <div class="inline-controls action-buttons-row">
             <button id="toggleStopsBtn">停留所 ON/OFF</button>
             <button id="toggleVehiclesBtn">車両 ON/OFF</button>
           </div>
           <button id="toggleStopConnectionsBtn">停留所連結線 ON/OFF</button>
+        </section>
+
+        <section class="card">
+          <h2>💾 エクスポート</h2>
           <button id="exportPngBtn">現在表示をPNG保存</button>
+          <p class="hint">デバッグ情報を隠した状態でエクスポートします</p>
         </section>
       </aside>
 
@@ -91,6 +104,6 @@
     </div>
 
     <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-    <script src="/static/app.js?v=20260425e"></script>
+    <script src="/static/app.js?v=20260428b"></script>
   </body>
 </html>
