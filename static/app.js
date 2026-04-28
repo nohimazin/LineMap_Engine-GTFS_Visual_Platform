@@ -1,6 +1,6 @@
 const savedView = JSON.parse(localStorage.getItem("linemap:view") || "null");
 const savedState = JSON.parse(localStorage.getItem("linemap:state") || "{}");
-const UI_BUILD_VERSION = "2026-04-25-stop-popup-fix-4";
+const UI_BUILD_VERSION = "2026-04-25-stop-popup-fix-5";
 const BASEMAP_STYLES = {
   liberty: "https://tiles.openfreemap.org/styles/liberty",
   bright: "https://tiles.openfreemap.org/styles/bright",
