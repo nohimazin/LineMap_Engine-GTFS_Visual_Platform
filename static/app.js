@@ -12,6 +12,28 @@ function resolveInitialStyle(styleUrl) {
   if (styleUrl && candidates.includes(styleUrl)) {
     return styleUrl;
   }
+
+  async function retryRtConnection() {
+    const url = document.getElementById("rtUrlInput").value.trim();
+    const interval = Number(document.getElementById("rtIntervalInput").value || "10");
+
+    try {
+      setRtStatus("再接続を試行しています...", "neutral");
+      // 再設定を投げてサービス側で再接続を促す
+      await api("/settings/gtfs_rt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gtfs_rt_url: url || null, interval_sec: interval }),
+      });
+
+      // 現在の状態を即座に取得して反映
+      const payload = await api("/vehicles");
+      renderRtStatus(payload.status);
+    } catch (err) {
+      setRtStatus(`再接続失敗: ${err.message}`, "error");
+      if (rtErrorDetails) rtErrorDetails.textContent = String(err.message || "");
+    }
+  }
   return BASEMAP_STYLES.bright;
 }
 
@@ -53,6 +75,7 @@ const routeList = document.getElementById("routeList");
 const routeSearchInput = document.getElementById("routeSearchInput");
 const uploadResult = document.getElementById("uploadResult");
 const rtStatus = document.getElementById("rtStatus");
+const rtErrorDetails = document.getElementById("rtErrorDetails");
 const appVersion = document.getElementById("appVersion");
 const mapStyleSelect = document.getElementById("mapStyleSelect");
 const mergeRoundTripToggle = document.getElementById("mergeRoundTripToggle");
@@ -100,6 +123,42 @@ function updateDebugOverlay() {
     `vehicles-symbol: ${getLayerVisibility("vehicles-symbol")}`,
   ];
   node.textContent = lines.join("\n");
+}
+
+function formatRtLastUpdate(lastUpdateUnix) {
+  if (!lastUpdateUnix) {
+    return "未取得";
+  }
+
+  const date = new Date(lastUpdateUnix * 1000);
+  if (Number.isNaN(date.getTime())) {
+    return "未取得";
+  }
+
+  return date.toLocaleString("ja-JP", { hour12: false });
+}
+
+function setRtStatus(message, kind = "neutral") {
+  if (!rtStatus) {
+    return;
+  }
+
+  rtStatus.textContent = message;
+  rtStatus.dataset.state = kind;
+}
+
+function renderRtStatus(status) {
+  if (status?.last_error) {
+    setRtStatus(`RT Error: ${status.last_error}`, "error");
+    if (rtErrorDetails) rtErrorDetails.textContent = String(status.last_error || "");
+    return;
+  }
+
+  const lastUpdateText = formatRtLastUpdate(status?.last_update_unix);
+  const intervalText = status?.interval_sec ? `${status.interval_sec}秒間隔` : "間隔未設定";
+  const urlText = status?.url ? "接続設定あり" : "未設定";
+  setRtStatus(`RT更新: ${lastUpdateText} / ${intervalText} / ${urlText}`, status?.url ? "ok" : "neutral");
+  if (rtErrorDetails) rtErrorDetails.textContent = "";
 }
 
 function saveUiState() {
@@ -150,7 +209,7 @@ function applyStopConnectionsLineWidth() {
 
 function createVehicleArrowIcon() {
   /**
-   * 車両用の矢印アイコンをSVGで生成
+   * 車両用の矢印アイコンを生成する
    * 返り値: ImageData形式で、map.addImage()で登録可能
    */
   const size = 32;
@@ -193,7 +252,7 @@ function createVehicleArrowIcon() {
   ctx.arc(size / 2, size / 2 + 2, 3, 0, Math.PI * 2);
   ctx.fill();
   
-  return canvas.getImageData(0, 0, size, size);
+  return ctx.getImageData(0, 0, size, size);
 }
 
 
@@ -985,9 +1044,7 @@ async function reloadAllData() {
   refreshOverlayLayers();
   renderRouteList();
   updateDebugOverlay();
-  rtStatus.textContent = vehiclesPayload.status?.last_error
-    ? `RT Error: ${vehiclesPayload.status.last_error}`
-    : `RT更新: ${vehiclesPayload.status?.last_update_unix || "未取得"}`;
+  renderRtStatus(vehiclesPayload.status);
 }
 
 async function uploadGtfs() {
@@ -1020,15 +1077,17 @@ async function saveRtConfig() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ gtfs_rt_url: url || null, interval_sec: interval }),
     });
-    rtStatus.textContent = `設定保存: ${result.status.url || "未設定"}`;
+    renderRtStatus(result.status);
   } catch (err) {
-    rtStatus.textContent = `保存失敗: ${err.message}`;
+    setRtStatus(`保存失敗: ${err.message}`, "error");
   }
 }
 
 function wireActions() {
   document.getElementById("uploadBtn").addEventListener("click", uploadGtfs);
   document.getElementById("rtSaveBtn").addEventListener("click", saveRtConfig);
+  const rtRetryBtn = document.getElementById("rtRetryBtn");
+  if (rtRetryBtn) rtRetryBtn.addEventListener("click", retryRtConnection);
   mapStyleSelect.value = state.baseMapStyle;
   mergeRoundTripToggle.checked = state.mergeRoundTrip;
   mergeColorSideSelect.value = state.mergeColorSide;
@@ -1226,10 +1285,10 @@ map.on("load", async () => {
 
   map.once("idle", async () => {
     try {
-      rtStatus.textContent = "GTFSデータを読み込み中...";
+      setRtStatus("GTFSデータを読み込み中...", "neutral");
       await reloadAllData();
     } catch (err) {
-      rtStatus.textContent = `初期読み込み失敗: ${err.message}`;
+      setRtStatus(`初期読み込み失敗: ${err.message}`, "error");
     }
   });
 
@@ -1238,11 +1297,9 @@ map.on("load", async () => {
       const payload = await api("/vehicles");
       state.vehicles = payload.vehicles;
       map.getSource("vehicles")?.setData(state.vehicles);
-      rtStatus.textContent = payload.status?.last_error
-        ? `RT Error: ${payload.status.last_error}`
-        : `RT更新: ${payload.status?.last_update_unix || "未取得"}`;
+      renderRtStatus(payload.status);
     } catch (err) {
-      rtStatus.textContent = `RT取得失敗: ${err.message}`;
+      setRtStatus(`RT取得失敗: ${err.message}`, "error");
     }
   }, 10000);
 });

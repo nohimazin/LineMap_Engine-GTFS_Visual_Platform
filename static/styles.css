@@ -285,6 +285,18 @@ button:hover {
   margin: 8px 0 0;
 }
 
+#rtStatus[data-state="error"] {
+  color: #a13535;
+}
+
+#rtStatus[data-state="ok"] {
+  color: var(--accent-strong);
+}
+
+#rtStatus[data-state="neutral"] {
+  color: var(--muted);
+}
+
 .map-area {
   border: 1px solid var(--border);
   border-radius: 16px;

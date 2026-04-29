@@ -46,8 +46,12 @@
               <input id="rtIntervalInput" type="number" min="5" max="60" value="10" />
               <span>秒</span>
             </div>
-            <button id="rtSaveBtn">RT設定を保存</button>
+            <div class="inline-controls">
+              <button id="rtSaveBtn">RT設定を保存</button>
+              <button id="rtRetryBtn">RT再接続</button>
+            </div>
             <p id="rtStatus" class="hint"></p>
+            <pre id="rtErrorDetails" class="hint" style="white-space: pre-wrap; font-family: inherit; margin-top:6px;"></pre>
           </div>
         </section>
 

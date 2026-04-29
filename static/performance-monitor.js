@@ -1,11 +1,7 @@
-"""
-パフォーマンス計測ツール
+// パフォーマンス計測ツール
+// 停留所連結線や停留所表示の切り替え時間を、ブラウザのコンソールから計測する。
 
-停留所連結線の表示/非表示切替時のレンダリング時間を計測する。
-ブラウザのコンソールで実行するスクリプット。
-"""
-
-const PerformanceMonitor = {
+globalThis.PerformanceMonitor = {
   /**
    * 停留所連結線の表示/非表示切替のパフォーマンスを計測する
    */
@@ -41,12 +37,10 @@ const PerformanceMonitor = {
         }, 5000);
       });
 
-      // レンダリング前の時刻記録
       const measurements = [];
       
       for (let i = 0; i < 3; i++) {
         const startTime = performance.now();
-        const startRenderCount = map.painter?.frameId || 0;
         
         // 表示/非表示を切り替え
         map.setLayoutProperty('stop-connections-line', 'visibility', targetVisibility);
