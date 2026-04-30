@@ -138,6 +138,22 @@ function formatRtLastUpdate(lastUpdateUnix) {
   return date.toLocaleString("ja-JP", { hour12: false });
 }
 
+function formatRtErrorHistory(status) {
+  const history = Array.isArray(status?.error_history) ? status.error_history : [];
+  if (!history.length) {
+    return "";
+  }
+
+  return history
+    .map((entry) => {
+      const when = formatRtLastUpdate(entry?.unix);
+      const httpStatus = entry?.http_status ? `HTTP ${entry.http_status}` : "HTTP status不明";
+      const retryCount = entry?.retry_count ?? "?";
+      return `${when} | ${httpStatus} | retry ${retryCount}\n${entry?.message ?? ""}`;
+    })
+    .join("\n\n");
+}
+
 function setRtStatus(message, kind = "neutral") {
   if (!rtStatus) {
     return;
@@ -149,16 +165,23 @@ function setRtStatus(message, kind = "neutral") {
 
 function renderRtStatus(status) {
   if (status?.last_error) {
-    setRtStatus(`RT Error: ${status.last_error}`, "error");
-    if (rtErrorDetails) rtErrorDetails.textContent = String(status.last_error || "");
+    const retryText = status?.consecutive_error_count ? ` / 連続失敗 ${status.consecutive_error_count}回` : "";
+    const httpText = status?.last_http_status ? ` / HTTP ${status.last_http_status}` : "";
+    setRtStatus(`RT Error: ${status.last_error}${retryText}${httpText}`, "error");
+    if (rtErrorDetails) {
+      rtErrorDetails.textContent = formatRtErrorHistory(status) || String(status.last_error || "");
+    }
     return;
   }
 
   const lastUpdateText = formatRtLastUpdate(status?.last_update_unix);
+  const lastSuccessText = formatRtLastUpdate(status?.last_success_unix);
   const intervalText = status?.interval_sec ? `${status.interval_sec}秒間隔` : "間隔未設定";
   const urlText = status?.url ? "接続設定あり" : "未設定";
-  setRtStatus(`RT更新: ${lastUpdateText} / ${intervalText} / ${urlText}`, status?.url ? "ok" : "neutral");
-  if (rtErrorDetails) rtErrorDetails.textContent = "";
+  const retryText = status?.consecutive_error_count ? ` / 連続失敗 ${status.consecutive_error_count}回` : "";
+  const httpText = status?.last_http_status ? ` / HTTP ${status.last_http_status}` : "";
+  setRtStatus(`RT更新: ${lastUpdateText} / 成功: ${lastSuccessText} / ${intervalText} / ${urlText}${retryText}${httpText}`, status?.url ? "ok" : "neutral");
+  if (rtErrorDetails) rtErrorDetails.textContent = formatRtErrorHistory(status);
 }
 
 function saveUiState() {

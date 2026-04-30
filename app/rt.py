@@ -12,7 +12,38 @@ class RealtimeVehicleService:
         self._interval_sec: int = 10
         self._vehicles: dict[str, Any] = {"type": "FeatureCollection", "features": []}
         self._last_update_unix: int | None = None
+        self._last_success_unix: int | None = None
         self._last_error: str | None = None
+        self._last_error_unix: int | None = None
+        self._last_http_status: int | None = None
+        self._consecutive_error_count: int = 0
+        self._error_history: list[dict[str, Any]] = []
+
+    def _record_error(self, message: str, http_status: int | None = None) -> None:
+        now_unix = int(time.time())
+        self._last_error = message
+        self._last_error_unix = now_unix
+        self._last_http_status = http_status
+        self._consecutive_error_count += 1
+        self._error_history.append(
+            {
+                "unix": now_unix,
+                "message": message,
+                "http_status": http_status,
+                "retry_count": self._consecutive_error_count,
+            }
+        )
+        if len(self._error_history) > 5:
+            self._error_history = self._error_history[-5:]
+
+    def _record_success(self) -> None:
+        now_unix = int(time.time())
+        self._last_update_unix = now_unix
+        self._last_success_unix = now_unix
+        self._last_error = None
+        self._last_error_unix = None
+        self._last_http_status = None
+        self._consecutive_error_count = 0
 
     def configure(self, url: str | None, interval_sec: int | None = None) -> None:
         self._url = url.strip() if url else None
@@ -27,6 +58,7 @@ class RealtimeVehicleService:
             async with httpx.AsyncClient(timeout=8.0) as client:
                 response = await client.get(self._url)
                 response.raise_for_status()
+                self._last_http_status = response.status_code
 
             feed = gtfs_realtime_pb2.FeedMessage()
             feed.ParseFromString(response.content)
@@ -66,10 +98,10 @@ class RealtimeVehicleService:
                 )
 
             self._vehicles = {"type": "FeatureCollection", "features": features}
-            self._last_update_unix = int(time.time())
-            self._last_error = None
+            self._record_success()
         except Exception as exc:  # noqa: BLE001
-            self._last_error = str(exc)
+            http_status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+            self._record_error(str(exc), http_status)
 
     async def polling_loop(self, trip_to_route_getter) -> None:
         while True:
@@ -88,4 +120,9 @@ class RealtimeVehicleService:
             "interval_sec": self._interval_sec,
             "last_update_unix": self._last_update_unix,
             "last_error": self._last_error,
+            "last_success_unix": self._last_success_unix,
+            "last_error_unix": self._last_error_unix,
+            "last_http_status": self._last_http_status,
+            "consecutive_error_count": self._consecutive_error_count,
+            "error_history": list(self._error_history),
         }
