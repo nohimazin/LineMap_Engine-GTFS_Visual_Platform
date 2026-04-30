@@ -8,6 +8,8 @@ from typing import Any
 class DataStore:
     def __init__(self, db_path: str = "data/linemap.db") -> None:
         self._lock = threading.Lock()
+        self._gtfs_data: dict[str, dict[str, Any]] = {}
+        self._current_gtfs_id: str = "default"
         self._routes_geojson: dict[str, Any] = {"type": "FeatureCollection", "features": []}
         self._stops_geojson: dict[str, Any] = {"type": "FeatureCollection", "features": []}
         self._stop_connections_geojson: dict[str, Any] = {"type": "FeatureCollection", "features": []}
@@ -58,6 +60,31 @@ class DataStore:
         self._trip_to_route = self._load_blob("trip_to_route", self._trip_to_route)
         self._route_catalog = self._load_blob("route_catalog", self._route_catalog)
 
+    def list_gtfs(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [
+                {
+                    "gtfs_id": gid,
+                    "is_current": gid == self._current_gtfs_id,
+                    "route_count": len(self._gtfs_data.get(gid, {}).get("route_catalog", [])),
+                    "stop_count": len(self._gtfs_data.get(gid, {}).get("stops_geojson", {}).get("features", [])),
+                }
+                for gid in sorted(self._gtfs_data.keys())
+            ]
+
+    def select_gtfs(self, gtfs_id: str) -> bool:
+        with self._lock:
+            if gtfs_id not in self._gtfs_data:
+                return False
+            self._current_gtfs_id = gtfs_id
+            data = self._gtfs_data[gtfs_id]
+            self._routes_geojson = data.get("routes_geojson", {"type": "FeatureCollection", "features": []})
+            self._stops_geojson = data.get("stops_geojson", {"type": "FeatureCollection", "features": []})
+            self._stop_connections_geojson = data.get("stop_connections_geojson", {"type": "FeatureCollection", "features": []})
+            self._trip_to_route = data.get("trip_to_route", {})
+            self._route_catalog = data.get("route_catalog", [])
+            return True
+
     def update_gtfs(
         self,
         routes_geojson: dict[str, Any],
@@ -65,8 +92,18 @@ class DataStore:
         stop_connections_geojson: dict[str, Any],
         trip_to_route: dict[str, str],
         route_catalog: list[dict[str, Any]],
+        gtfs_id: str = "default",
     ) -> None:
         with self._lock:
+            data = {
+                "routes_geojson": routes_geojson,
+                "stops_geojson": stops_geojson,
+                "stop_connections_geojson": stop_connections_geojson,
+                "trip_to_route": trip_to_route,
+                "route_catalog": route_catalog,
+            }
+            self._gtfs_data[gtfs_id] = data
+            self._current_gtfs_id = gtfs_id
             self._routes_geojson = routes_geojson
             self._stops_geojson = stops_geojson
             self._stop_connections_geojson = stop_connections_geojson

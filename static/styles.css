@@ -256,6 +256,37 @@ button:hover {
   padding-right: 4px;
 }
 
+.stop-search-list {
+  margin-top: 8px;
+  overflow: auto;
+  min-height: 100px;
+  max-height: clamp(120px, 20dvh, 240px);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding-right: 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.stop-search-item {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.85rem;
+  transition: background-color 0.15s;
+}
+
+.stop-search-item:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.stop-search-item:last-child {
+  border-bottom: none;
+}
+
 .route-item {
   display: flex;
   gap: 8px;

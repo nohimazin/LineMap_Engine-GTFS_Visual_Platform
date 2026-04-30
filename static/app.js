@@ -73,9 +73,13 @@ const state = {
 
 const routeList = document.getElementById("routeList");
 const routeSearchInput = document.getElementById("routeSearchInput");
+const stopSearchInput = document.getElementById("stopSearchInput");
+const stopSearchList = document.getElementById("stopSearchList");
 const uploadResult = document.getElementById("uploadResult");
 const rtStatus = document.getElementById("rtStatus");
 const rtErrorDetails = document.getElementById("rtErrorDetails");
+const gtfsSelect = document.getElementById("gtfsSelect");
+const gtfsSelectResult = document.getElementById("gtfsSelectResult");
 const appVersion = document.getElementById("appVersion");
 const mapStyleSelect = document.getElementById("mapStyleSelect");
 const mergeRoundTripToggle = document.getElementById("mergeRoundTripToggle");
@@ -1040,6 +1044,100 @@ async function resolveStopPropertiesWithApiFallback(stopId, fallbackProperties) 
   return resolved;
 }
 
+function performStopSearch(query) {
+  if (!query.trim()) {
+    return [];
+  }
+  const normalizedQuery = normalizeDisplayText(query);
+  return (state.stops.features || [])
+    .filter((feature) => {
+      const stopName = normalizeDisplayText(feature?.properties?.stop_name || "");
+      return stopName.includes(normalizedQuery);
+    })
+    .slice(0, 30);
+}
+
+function renderStopSearchResults(results) {
+  stopSearchList.innerHTML = "";
+  if (results.length === 0) {
+    const noResults = document.createElement("div");
+    noResults.className = "hint";
+    noResults.style.padding = "6px 8px";
+    noResults.textContent = "検索結果なし";
+    stopSearchList.appendChild(noResults);
+    return;
+  }
+
+  results.forEach((feature) => {
+    const item = document.createElement("div");
+    item.className = "stop-search-item";
+    const stopName = feature?.properties?.stop_name || feature?.properties?.stop_id || "不明";
+    const routeCount = (feature?.properties?.routes || []).length;
+    item.textContent = `${stopName}${routeCount > 0 ? ` (路線: ${routeCount})` : ""}`;
+    item.addEventListener("click", () => {
+      zoomToStop(feature.geometry.coordinates);
+    });
+    stopSearchList.appendChild(item);
+  });
+
+  if (results.length >= 30) {
+    const more = document.createElement("div");
+    more.className = "hint";
+    more.style.padding = "6px 8px";
+    more.textContent = "他にも多数あります...";
+    stopSearchList.appendChild(more);
+  }
+}
+
+function zoomToStop(coordinates) {
+  map.easeTo({
+    center: [coordinates[0], coordinates[1]],
+    zoom: 15,
+    duration: 800,
+  });
+}
+
+async function refreshGtfsList() {
+  try {
+    const response = await api("/gtfs_list");
+    const gtfsList = response.gtfs_list || [];
+
+    gtfsSelect.innerHTML = "";
+    gtfsList.forEach((item) => {
+      const option = document.createElement("option");
+      option.value = item.gtfs_id;
+      option.textContent = `${item.gtfs_id} (路線: ${item.route_count}, 停留所: ${item.stop_count})`;
+      option.selected = item.is_current;
+      gtfsSelect.appendChild(option);
+    });
+
+    if (gtfsList.length > 0) {
+      const current = gtfsList.find((item) => item.is_current);
+      if (current) {
+        gtfsSelectResult.textContent = `現在: ${current.gtfs_id} (路線: ${current.route_count}, 停留所: ${current.stop_count})`;
+      }
+    }
+  } catch (err) {
+    console.warn("GTFS一覧の取得に失敗しました", err);
+    gtfsSelectResult.textContent = `読み込みエラー: ${err.message}`;
+  }
+}
+
+async function selectGtfs(gtfsId) {
+  try {
+    gtfsSelectResult.textContent = "切り替え中...";
+    const response = await api(`/gtfs/select?gtfs_id=${encodeURIComponent(gtfsId)}`, {
+      method: "POST",
+    });
+
+    gtfsSelectResult.textContent = `✓ 切り替え完了: ${gtfsId}`;
+    await reloadAllData();
+  } catch (err) {
+    gtfsSelectResult.textContent = `✗ 切り替え失敗: ${err.message}`;
+    console.error("GTFS選択に失敗しました", err);
+  }
+}
+
 async function reloadAllData() {
   const [routes, routeCatalog, stops, stopConnections, vehiclesPayload] = await Promise.all([
     api("/routes"),
@@ -1085,6 +1183,7 @@ async function uploadGtfs() {
     const result = await api("/upload", { method: "POST", body: formData });
     uploadResult.textContent = `${result.message} routes=${result.routes}, stops=${result.stops}`;
     await reloadAllData();
+    await refreshGtfsList();
   } catch (err) {
     uploadResult.textContent = `失敗: ${err.message}`;
   }
@@ -1111,6 +1210,21 @@ function wireActions() {
   document.getElementById("rtSaveBtn").addEventListener("click", saveRtConfig);
   const rtRetryBtn = document.getElementById("rtRetryBtn");
   if (rtRetryBtn) rtRetryBtn.addEventListener("click", retryRtConnection);
+
+  if (gtfsSelect) {
+    gtfsSelect.addEventListener("change", async (event) => {
+      await selectGtfs(event.target.value);
+    });
+  }
+
+  if (stopSearchInput) {
+    stopSearchInput.addEventListener("input", (event) => {
+      const query = event.target.value;
+      const results = performStopSearch(query);
+      renderStopSearchResults(results);
+    });
+  }
+
   mapStyleSelect.value = state.baseMapStyle;
   mergeRoundTripToggle.checked = state.mergeRoundTrip;
   mergeColorSideSelect.value = state.mergeColorSide;
@@ -1305,6 +1419,12 @@ map.on("load", async () => {
   refreshOverlayLayers();
   wireActions();
   rtStatus.textContent = "ベースマップを表示中...";
+
+  try {
+    await refreshGtfsList();
+  } catch (err) {
+    console.warn("GTFS一覧の初期取得に失敗しました", err);
+  }
 
   map.once("idle", async () => {
     try {

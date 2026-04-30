@@ -2,7 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -76,7 +76,7 @@ def health() -> dict[str, str]:
 
 @app.post("/upload")
 @app.post("/upload_gtfs")
-async def upload_gtfs(file: UploadFile = File(...)) -> dict[str, int | str]:
+async def upload_gtfs(file: UploadFile = File(...), gtfs_id: str = Query("default")) -> dict[str, int | str]:
     if not file.filename.lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="GTFS ZIPファイルを指定してください。")
 
@@ -92,10 +92,12 @@ async def upload_gtfs(file: UploadFile = File(...)) -> dict[str, int | str]:
         stop_connections_geojson=parsed["stop_connections_geojson"],
         trip_to_route=parsed["trip_to_route"],
         route_catalog=parsed["route_catalog"],
+        gtfs_id=gtfs_id,
     )
 
     return {
         "message": "GTFSを登録しました。",
+        "gtfs_id": gtfs_id,
         "routes": len(parsed["routes_geojson"]["features"]),
         "stops": len(parsed["stops_geojson"]["features"]),
         "stop_connections": len(parsed["stop_connections_geojson"]["features"]),
@@ -128,6 +130,22 @@ def vehicles() -> dict:
         "vehicles": rt_service.vehicles(),
         "status": rt_service.status(),
     }
+
+
+@app.get("/gtfs_list")
+def gtfs_list() -> dict:
+    return {"gtfs_list": store.list_gtfs()}
+
+
+@app.post("/gtfs/select")
+def select_gtfs(gtfs_id: str) -> dict:
+    if store.select_gtfs(gtfs_id):
+        return {
+            "message": f"GTFS {gtfs_id} を選択しました",
+            "current": gtfs_id,
+            "list": store.list_gtfs(),
+        }
+    raise HTTPException(status_code=404, detail=f"GTFS {gtfs_id} が見つかりません")
 
 
 @app.post("/settings/gtfs_rt")
