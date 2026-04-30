@@ -31,6 +31,14 @@
           </select>
         </section>
 
+        <section class="card">
+          <h2>📁 GTFS選択</h2>
+          <select id="gtfsSelect">
+            <option value="default">デフォルト</option>
+          </select>
+          <p id="gtfsSelectResult" class="hint" style="font-size: 0.85em; margin-top: 4px;"></p>
+        </section>
+
         <section class="card card-group">
           <h2>📊 データ入力</h2>
           <div class="card-subsection">
@@ -61,6 +69,14 @@
             <input id="routeSearchInput" placeholder="路線名検索" />
           </div>
           <div id="routeList" class="route-list"></div>
+        </section>
+
+        <section class="card grow">
+          <div class="card-header">
+            <h2>🛑 停留所検索</h2>
+            <input id="stopSearchInput" placeholder="停留所名検索" />
+          </div>
+          <div id="stopSearchList" class="stop-search-list"></div>
         </section>
 
         <section class="card card-group">
