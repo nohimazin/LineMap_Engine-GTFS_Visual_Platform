@@ -377,12 +377,36 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
 
     route_features: list[dict[str, Any]] = []
     route_catalog: list[dict[str, Any]] = []
+    stop_connections_by_route: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for feature in stop_connection_features:
+        route_id = str(feature.get("properties", {}).get("route_id", "")).strip()
+        if route_id:
+            stop_connections_by_route[route_id].append(feature)
+
     for route_id, route in routes.items():
         lines = route_lines.get(route_id, [])
+        geometry = None
+        line_count = len(lines)
+
         if lines:
             geometry = {"type": "MultiLineString", "coordinates": lines}
         else:
-            geometry = None
+            fallback_features = stop_connections_by_route.get(route_id, [])
+            fallback_geometries = [feature.get("geometry") for feature in fallback_features if feature.get("geometry")]
+            fallback_lines: list[list[list[float]]] = []
+            for fallback_geometry in fallback_geometries:
+                if fallback_geometry.get("type") == "LineString":
+                    coordinates = fallback_geometry.get("coordinates") or []
+                    if len(coordinates) >= 2:
+                        fallback_lines.append(coordinates)
+                elif fallback_geometry.get("type") == "MultiLineString":
+                    for coordinates in fallback_geometry.get("coordinates") or []:
+                        if len(coordinates) >= 2:
+                            fallback_lines.append(coordinates)
+
+            if fallback_lines:
+                geometry = {"type": "MultiLineString", "coordinates": fallback_lines}
+                line_count = len(fallback_lines)
 
         props = {
             "route_id": route_id,
@@ -390,7 +414,7 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
             "route_long_name": route["route_long_name"],
             "route_color": route["route_color"],
             "route_text_color": route["route_text_color"],
-            "line_count": len(lines),
+            "line_count": line_count,
         }
         route_catalog.append(props)
 
