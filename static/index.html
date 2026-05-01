@@ -46,6 +46,12 @@
             <input type="file" id="gtfsZipInput" accept=".zip" />
             <button id="uploadBtn">GTFSを読み込む</button>
             <p id="uploadResult" class="hint"></p>
+            <div id="gtfsLoadProgressWrap" class="load-progress is-hidden" aria-live="polite">
+              <div class="load-progress-bar">
+                <div id="gtfsLoadProgressBar"></div>
+              </div>
+              <p id="gtfsLoadProgressText" class="hint load-progress-text"></p>
+            </div>
           </div>
           <div class="card-subsection">
             <h3>GTFS-RT設定</h3>
@@ -124,6 +130,6 @@
     </div>
 
     <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-    <script src="/static/app.js?v=20260428b"></script>
+    <script src="/static/app.js?v=20260502a"></script>
   </body>
 </html>
