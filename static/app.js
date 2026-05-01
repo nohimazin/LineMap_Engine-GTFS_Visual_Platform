@@ -1,6 +1,6 @@
 const savedView = JSON.parse(localStorage.getItem("linemap:view") || "null");
 const savedState = JSON.parse(localStorage.getItem("linemap:state") || "{}");
-const UI_BUILD_VERSION = "2026-04-28-ui-settings-v2";
+const UI_BUILD_VERSION = "2026-05-02-display-settings-v1";
 const BASEMAP_STYLES = {
   liberty: "https://tiles.openfreemap.org/styles/liberty",
   bright: "https://tiles.openfreemap.org/styles/bright",
@@ -76,6 +76,9 @@ const routeSearchInput = document.getElementById("routeSearchInput");
 const stopSearchInput = document.getElementById("stopSearchInput");
 const stopSearchList = document.getElementById("stopSearchList");
 const uploadResult = document.getElementById("uploadResult");
+const gtfsLoadProgressWrap = document.getElementById("gtfsLoadProgressWrap");
+const gtfsLoadProgressBar = document.getElementById("gtfsLoadProgressBar");
+const gtfsLoadProgressText = document.getElementById("gtfsLoadProgressText");
 const rtStatus = document.getElementById("rtStatus");
 const rtErrorDetails = document.getElementById("rtErrorDetails");
 const gtfsSelect = document.getElementById("gtfsSelect");
@@ -86,6 +89,8 @@ const mergeRoundTripToggle = document.getElementById("mergeRoundTripToggle");
 const mergeColorSideSelect = document.getElementById("mergeColorSideSelect");
 const stopConnectionsWidthRange = document.getElementById("stopConnectionsWidthRange");
 const stopConnectionsWidthInput = document.getElementById("stopConnectionsWidthInput");
+const toggleStopsBtn = document.getElementById("toggleStopsBtn");
+const toggleVehiclesBtn = document.getElementById("toggleVehiclesBtn");
 const toggleStopConnectionsBtn = document.getElementById("toggleStopConnectionsBtn");
 let debugOverlay = null;
 
@@ -165,6 +170,17 @@ function setRtStatus(message, kind = "neutral") {
 
   rtStatus.textContent = message;
   rtStatus.dataset.state = kind;
+}
+
+function setGtfsLoadProgress(percent, message, detail = "") {
+  if (!gtfsLoadProgressWrap || !gtfsLoadProgressBar || !gtfsLoadProgressText) {
+    return;
+  }
+
+  const clampedPercent = Math.max(0, Math.min(100, percent));
+  gtfsLoadProgressWrap.classList.remove("is-hidden");
+  gtfsLoadProgressBar.style.width = `${clampedPercent}%`;
+  gtfsLoadProgressText.textContent = detail ? `${message} ${detail}` : message;
 }
 
 function renderRtStatus(status) {
@@ -314,6 +330,31 @@ function applyLayerVisibility() {
   updateDebugOverlay();
 }
 
+function syncDisplayControls() {
+  if (toggleStopsBtn) {
+    toggleStopsBtn.textContent = state.showStops ? "停留所 ON" : "停留所 OFF";
+  }
+  if (toggleVehiclesBtn) {
+    toggleVehiclesBtn.textContent = state.showVehicles ? "車両 ON" : "車両 OFF";
+  }
+  if (toggleStopConnectionsBtn) {
+    toggleStopConnectionsBtn.disabled = state.mergeRoundTrip;
+    toggleStopConnectionsBtn.textContent = state.mergeRoundTrip
+      ? "停留所連結線（統合表示中は非表示）"
+      : state.showStopConnections
+        ? "停留所連結線 ON"
+        : "停留所連結線 OFF";
+  }
+}
+
+function applyDisplaySettings() {
+  applyMergeModeVisualPolicy();
+  updateRouteFilter();
+  applyLayerVisibility();
+  applyStopConnectionsLineWidth();
+  syncDisplayControls();
+}
+
 function refreshOverlayLayers() {
   // 矢印アイコンをマップに登録（既に登録されていないか確認）
   if (!map.hasImage('vehicle-arrow')) {
@@ -325,10 +366,7 @@ function refreshOverlayLayers() {
   
   createLayersIfNeeded();
   syncSourcesData();
-  updateRouteFilter();
-  applyMergeModeVisualPolicy();
-  applyLayerVisibility();
-  updateDebugOverlay();
+  applyDisplaySettings();
 }
 
 function applyMergeModeVisualPolicy() {
@@ -349,11 +387,6 @@ function applyMergeModeVisualPolicy() {
   }
 
   applyRouteLineWidth();
-
-  if (toggleStopConnectionsBtn) {
-    toggleStopConnectionsBtn.disabled = false;
-    toggleStopConnectionsBtn.textContent = "停留所連結線 ON/OFF";
-  }
   updateDebugOverlay();
 }
 
@@ -1139,13 +1172,16 @@ async function selectGtfs(gtfsId) {
 }
 
 async function reloadAllData() {
-  const [routes, routeCatalog, stops, stopConnections, vehiclesPayload] = await Promise.all([
-    api("/routes"),
-    api("/route_catalog"),
-    api("/stops"),
-    api("/stop_connections"),
-    api("/vehicles"),
-  ]);
+  setGtfsLoadProgress(10, "GTFSデータを読み込み中...", "路線情報を取得しています");
+  const routes = await api("/routes");
+  setGtfsLoadProgress(30, "GTFSデータを読み込み中...", "路線カタログを取得しています");
+  const routeCatalog = await api("/route_catalog");
+  setGtfsLoadProgress(50, "GTFSデータを読み込み中...", "停留所情報を取得しています");
+  const stops = await api("/stops");
+  setGtfsLoadProgress(70, "GTFSデータを読み込み中...", "停留所連結線を取得しています");
+  const stopConnections = await api("/stop_connections");
+  setGtfsLoadProgress(90, "GTFSデータを読み込み中...", "車両情報を取得しています");
+  const vehiclesPayload = await api("/vehicles");
 
   state.rawRoutes = routes;
   state.rawRouteCatalog = routeCatalog;
@@ -1164,8 +1200,49 @@ async function reloadAllData() {
   createLayersIfNeeded();
   refreshOverlayLayers();
   renderRouteList();
+  applyDisplaySettings();
   updateDebugOverlay();
   renderRtStatus(vehiclesPayload.status);
+  setGtfsLoadProgress(100, "GTFSデータの読み込みが完了しました。");
+}
+
+function uploadGtfsWithProgress(formData) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/upload");
+    xhr.responseType = "json";
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) {
+        setGtfsLoadProgress(20, "GTFSファイルを送信中...", "進捗を計算しています");
+        return;
+      }
+
+      const uploadPercent = Math.max(0, Math.min(100, Math.round((event.loaded / event.total) * 100)));
+      setGtfsLoadProgress(Math.min(60, Math.max(5, uploadPercent * 0.6)), "GTFSファイルを送信中...", `${uploadPercent}%`);
+    };
+
+    xhr.onload = () => {
+      const responseBody = xhr.response ?? (() => {
+        try {
+          return JSON.parse(xhr.responseText || "null");
+        } catch (error) {
+          return null;
+        }
+      })();
+
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(responseBody);
+        return;
+      }
+
+      const detail = responseBody?.detail || xhr.responseText || "GTFSアップロードに失敗しました。";
+      reject(new Error(`${xhr.status} ${detail}`));
+    };
+
+    xhr.onerror = () => reject(new Error("GTFSアップロード中に通信エラーが発生しました。"));
+    xhr.send(formData);
+  });
 }
 
 async function uploadGtfs() {
@@ -1180,12 +1257,15 @@ async function uploadGtfs() {
   formData.append("file", file);
 
   try {
-    const result = await api("/upload", { method: "POST", body: formData });
+    setGtfsLoadProgress(5, "GTFSアップロードを開始しています...");
+    const result = await uploadGtfsWithProgress(formData);
+    setGtfsLoadProgress(70, "GTFSをサーバーで読み込み中...");
     uploadResult.textContent = `${result.message} routes=${result.routes}, stops=${result.stops}`;
     await reloadAllData();
     await refreshGtfsList();
   } catch (err) {
     uploadResult.textContent = `失敗: ${err.message}`;
+    setGtfsLoadProgress(100, "GTFSの読み込みに失敗しました。", String(err.message || ""));
   }
 }
 
@@ -1240,7 +1320,7 @@ function wireActions() {
     mergeColorSideSelect.disabled = !state.mergeRoundTrip;
     normalizeRouteDatasets();
     rebuildVisibleRouteIds();
-    applyMergeModeVisualPolicy();
+    applyDisplaySettings();
     refreshOverlayLayers();
     renderRouteList();
     saveUiState();
@@ -1251,6 +1331,7 @@ function wireActions() {
     if (state.mergeRoundTrip) {
       normalizeRouteDatasets();
       rebuildVisibleRouteIds();
+      applyDisplaySettings();
       refreshOverlayLayers();
       renderRouteList();
     }
@@ -1277,30 +1358,19 @@ function wireActions() {
 
   document.getElementById("toggleStopsBtn").addEventListener("click", () => {
     state.showStops = !state.showStops;
-    map.setLayoutProperty("stops-circle", "visibility", state.showStops ? "visible" : "none");
+    applyDisplaySettings();
     saveUiState();
   });
 
   document.getElementById("toggleVehiclesBtn").addEventListener("click", () => {
     state.showVehicles = !state.showVehicles;
-    map.setLayoutProperty("vehicles-symbol", "visibility", state.showVehicles ? "visible" : "none");
+    applyDisplaySettings();
     saveUiState();
   });
 
   document.getElementById("toggleStopConnectionsBtn").addEventListener("click", () => {
     state.showStopConnections = !state.showStopConnections;
-    map.setLayoutProperty(
-      "stop-connections-line",
-      "visibility",
-      state.showStopConnections ? "visible" : "none",
-    );
-    if (map.getLayer("stop-connections-line-hit")) {
-      map.setLayoutProperty(
-        "stop-connections-line-hit",
-        "visibility",
-        state.showStopConnections ? "visible" : "none",
-      );
-    }
+    applyDisplaySettings();
     saveUiState();
   });
 
@@ -1419,6 +1489,7 @@ map.on("load", async () => {
   refreshOverlayLayers();
   wireActions();
   rtStatus.textContent = "ベースマップを表示中...";
+  setGtfsLoadProgress(5, "GTFSデータを読み込み中...", "初期化しています");
 
   try {
     await refreshGtfsList();
@@ -1430,6 +1501,7 @@ map.on("load", async () => {
     try {
       setRtStatus("GTFSデータを読み込み中...", "neutral");
       await reloadAllData();
+      applyDisplaySettings();
     } catch (err) {
       setRtStatus(`初期読み込み失敗: ${err.message}`, "error");
     }
