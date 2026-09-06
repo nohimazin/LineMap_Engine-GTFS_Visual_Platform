@@ -24,7 +24,7 @@ GTFS と GTFS-RT を読み込み、路線・停留所・停留所連結線・リ
 - 現在の地図表示の PNG 保存
 - 表示設定と地図位置のブラウザ内保存（localStorage）
 - GTFS 読み込み中の進捗表示
-- 複数GTFSのメモリ上での登録・切替
+- 複数GTFSの登録・切替（SQLiteへ保存）
 
 ## 技術構成
 
@@ -100,13 +100,13 @@ uvicorn app.main:app --reload --port 8001
 
 ### 複数GTFSを切り替える
 
-アップロード時にAPIの `gtfs_id` を指定すると、複数のGTFSをメモリ上に登録できます。画面のGTFS選択欄から登録済みデータを切り替えます。
+アップロード画面で `GTFS ID` を指定すると、複数のGTFSを登録できます。画面のGTFS選択欄から登録済みデータを切り替えます。
 
 ```powershell
 curl.exe -F "file=@sample.zip" "http://127.0.0.1:8000/upload?gtfs_id=sample"
 ```
 
-現在の実装では、複数GTFSの切替情報自体はメモリ上で管理されます。アプリを再起動すると、登録済みGTFS一覧は初期化されます。一方、現在選択中のGeoJSONなどは `data/linemap.db` に保存されます。
+登録済みGTFSのGeoJSONと選択状態は `data/linemap.db` に保存され、アプリ再起動後も一覧と切替状態を復元します。
 
 ### GTFS-RTを設定する
 
