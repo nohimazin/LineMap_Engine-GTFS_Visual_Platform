@@ -84,6 +84,7 @@ const state = {
   showStops: savedState.showStops ?? true,
   showStopConnections: savedState.showStopConnections ?? false,
   showVehicles: savedState.showVehicles ?? true,
+  showStopRouteIds: savedState.showStopRouteIds ?? false,
   mergeRoundTrip: savedState.mergeRoundTrip ?? false,
   mergeColorSide: savedState.mergeColorSide || "first",
   stopConnectionsLineWidth: savedState.stopConnectionsLineWidth ?? 2.5,
@@ -108,6 +109,7 @@ const mergeRoundTripToggle = document.getElementById("mergeRoundTripToggle");
 const mergeColorSideSelect = document.getElementById("mergeColorSideSelect");
 const stopConnectionsWidthRange = document.getElementById("stopConnectionsWidthRange");
 const stopConnectionsWidthInput = document.getElementById("stopConnectionsWidthInput");
+const showStopRouteIdsToggle = document.getElementById("showStopRouteIdsToggle");
 const toggleStopsBtn = document.getElementById("toggleStopsBtn");
 const toggleVehiclesBtn = document.getElementById("toggleVehiclesBtn");
 const toggleStopConnectionsBtn = document.getElementById("toggleStopConnectionsBtn");
@@ -231,6 +233,7 @@ function saveUiState() {
       showStops: state.showStops,
       showStopConnections: state.showStopConnections,
       showVehicles: state.showVehicles,
+      showStopRouteIds: state.showStopRouteIds,
       mergeRoundTrip: state.mergeRoundTrip,
       mergeColorSide: state.mergeColorSide,
       stopConnectionsLineWidth: state.stopConnectionsLineWidth,
@@ -1015,11 +1018,19 @@ function buildStopPopupHtml(properties) {
   const title = stopName || stopCode || `バス停 ${stopId || "不明"}`;
   const routes = Array.isArray(properties?.routes) ? properties.routes.filter(Boolean) : [];
   const times = Array.isArray(properties?.times) ? properties.times.filter(Boolean) : [];
+  const routeNames = routes.map((routeId) => {
+    const routeName = getRouteDisplayName(routeId);
+    return state.showStopRouteIds && routeName !== routeId
+      ? `${routeName} (${routeId})`
+      : routeName;
+  });
 
   const lines = [
     `停留所名: <span class="stop-popup-name">${escapeHtml(title)}</span>`,
-    `stop_id: ${escapeHtml(stopId || "不明")}`,
   ];
+  if (state.showStopRouteIds) {
+    lines.push(`stop_id: ${escapeHtml(stopId || "不明")}`);
+  }
   if (stopCode) {
     lines.push(`標柱コード: ${escapeHtml(stopCode)}`);
   }
@@ -1027,7 +1038,7 @@ function buildStopPopupHtml(properties) {
     lines.push(`親停留所: ${escapeHtml(parentStation)}`);
   }
   if (routes.length > 0) {
-    lines.push(`通過路線: ${routes.slice(0, 5).map(escapeHtml).join(", ")}`);
+    lines.push(`通過路線: ${routeNames.slice(0, 5).map(escapeHtml).join(", ")}`);
   }
   if (times.length > 0) {
     lines.push(`時刻(簡易): ${times.slice(0, 5).map(escapeHtml).join(", ")}`);
@@ -1342,9 +1353,17 @@ function wireActions() {
 
   mapStyleSelect.value = state.baseMapStyle;
   mergeRoundTripToggle.checked = state.mergeRoundTrip;
+  if (showStopRouteIdsToggle) {
+    showStopRouteIdsToggle.checked = state.showStopRouteIds;
+  }
   mergeColorSideSelect.value = state.mergeColorSide;
   mergeColorSideSelect.disabled = !state.mergeRoundTrip;
   syncStopConnectionsWidthControls();
+
+  showStopRouteIdsToggle?.addEventListener("change", () => {
+    state.showStopRouteIds = showStopRouteIdsToggle.checked;
+    saveUiState();
+  });
 
   mapStyleSelect.addEventListener("change", (event) => {
     switchBaseMapStyle(event.target.value);
