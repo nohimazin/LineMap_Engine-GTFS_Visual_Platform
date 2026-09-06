@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>停留所検索テスト</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .test-case {
+      background: white;
+      padding: 15px;
+      margin: 10px 0;
+      border-radius: 8px;
+      border-left: 4px solid #ccc;
+    }
+    .test-case.pass {
+      border-left-color: #4caf50;
+    }
+    .test-case.fail {
+      border-left-color: #f44336;
+    }
+    .test-title {
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+    .test-result {
+      font-size: 0.9rem;
+      margin-top: 5px;
+    }
+    #results {
+      margin-top: 20px;
+      font-weight: bold;
+    }
+    .pass { color: #4caf50; }
+    .fail { color: #f44336; }
+  </style>
+</head>
+<body>
+  <h1>停留所検索機能テスト</h1>
+  <div id="testContainer"></div>
+  <div id="results"></div>
+
+  <script>
+    // Mock state object with sample stops
+    const state = {
+      stops: {
+        features: [
+          {
+            properties: {
+              stop_id: "1",
+              stop_name: "Central Station",
+              routes: ["R1", "R2"]
+            },
+            geometry: { coordinates: [139.7, 35.7] }
+          },
+          {
+            properties: {
+              stop_id: "2",
+              stop_name: "東京駅",
+              routes: ["R3"]
+            },
+            geometry: { coordinates: [139.77, 35.68] }
+          },
+          {
+            properties: {
+              stop_id: "3",
+              stop_name: "Shinjuku Station",
+              routes: []
+            },
+            geometry: { coordinates: [139.7, 35.69] }
+          },
+          {
+            properties: {
+              stop_id: "4",
+              stop_name: "新宿駅",
+              routes: ["R4", "R5", "R6"]
+            },
+            geometry: { coordinates: [139.7, 35.69] }
+          },
+          {
+            properties: {
+              stop_id: "5",
+              stop_name: "Platform A",
+              routes: ["R1"]
+            },
+            geometry: { coordinates: [139.6, 35.6] }
+          }
+        ]
+      }
+    };
+
+    // Helper function from app.js
+    function normalizeDisplayText(text) {
+      return text
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .trim();
+    }
+
+    // Implementation from app.js
+    function performStopSearch(query) {
+      if (!query.trim()) {
+        return [];
+      }
+      const normalizedQuery = normalizeDisplayText(query);
+      return (state.stops.features || [])
+        .filter((feature) => {
+          const stopName = normalizeDisplayText(feature?.properties?.stop_name || "");
+          return stopName.includes(normalizedQuery);
+        })
+        .slice(0, 30);
+    }
+
+    // Test cases
+    const testCases = [
+      {
+        name: "1文字入力で部分一致フィルタリング",
+        query: "central",
+        expectedCount: 1,
+        expectedNames: ["Central Station"]
+      },
+      {
+        name: "大文字小文字区別なし",
+        query: "CENTRAL",
+        expectedCount: 1,
+        expectedNames: ["Central Station"]
+      },
+      {
+        name: "日本語停留所検索",
+        query: "東京",
+        expectedCount: 1,
+        expectedNames: ["東京駅"]
+      },
+      {
+        name: "空白入力で空結果",
+        query: "",
+        expectedCount: 0,
+        expectedNames: []
+      },
+      {
+        name: "複数文字マッチング",
+        query: "station",
+        expectedCount: 2,
+        expectedNames: ["Central Station", "Shinjuku Station"]
+      },
+      {
+        name: "新宿検索（日本語）",
+        query: "新宿",
+        expectedCount: 1,
+        expectedNames: ["新宿駅"]
+      },
+      {
+        name: "マッチなし",
+        query: "xyz123",
+        expectedCount: 0,
+        expectedNames: []
+      },
+      {
+        name: "Platform検索",
+        query: "platform",
+        expectedCount: 1,
+        expectedNames: ["Platform A"]
+      }
+    ];
+
+    // Run tests
+    let passCount = 0;
+    let failCount = 0;
+
+    const container = document.getElementById("testContainer");
+
+    testCases.forEach((testCase) => {
+      const results = performStopSearch(testCase.query);
+      const resultNames = results.map(r => r.properties.stop_name);
+      const passed = 
+        results.length === testCase.expectedCount &&
+        resultNames.every((name, i) => name === testCase.expectedNames[i]);
+
+      if (passed) {
+        passCount++;
+      } else {
+        failCount++;
+      }
+
+      const caseDiv = document.createElement("div");
+      caseDiv.className = `test-case ${passed ? "pass" : "fail"}`;
+      caseDiv.innerHTML = `
+        <div class="test-title">${passed ? "✓" : "✗"} ${testCase.name}</div>
+        <div class="test-result">
+          Query: "${testCase.query}"<br>
+          Expected: ${testCase.expectedCount} results (${testCase.expectedNames.join(", ")})<br>
+          Got: ${results.length} results (${resultNames.join(", ")})
+        </div>
+      `;
+      container.appendChild(caseDiv);
+    });
+
+    // Summary
+    const resultsDiv = document.getElementById("results");
+    const total = testCases.length;
+    resultsDiv.innerHTML = `
+      <div>テスト結果: <span class="pass">${passCount}/${total} PASS</span> <span class="fail">${failCount}/${total} FAIL</span></div>
+    `;
+  </script>
+</body>
+</html>
