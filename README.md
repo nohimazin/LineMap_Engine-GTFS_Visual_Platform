@@ -1,150 +1,268 @@
 # LineMap Engine GTFS Visual Platform
 
-GTFS / GTFS-RT を地図上に可視化する FastAPI + MapLibre ベースのWebアプリです。
+GTFS と GTFS-RT を読み込み、路線・停留所・停留所連結線・リアルタイム車両を地図上に表示する Web アプリケーションです。
 
-## 機能
+バックエンドは FastAPI、フロントエンドの地図描画は MapLibre GL JS、ベースマップは OpenFreeMap を使用します。
 
-- GTFS ZIPアップロード
-- 路線（GeoJSON）表示、色分け、ON/OFF
-- 停留所（GeoJSON）表示
-- GTFS-RT 車両位置の定期更新表示
-- 路線検索
-- 現在の地図表示をPNG保存
-- 表示状態と地図位置のローカル保存
+## 主な機能
+
+- GTFS ZIP のアップロードと解析
+- ZIP 内のサブフォルダーに配置された GTFS ファイルの読み込み
+- UTF-8 / CP932 / Shift_JIS の GTFS テキストに対応
+- 路線、停留所、停留所連結線の GeoJSON 生成
+- `shapes.txt` を利用した路線形状の描画
+- 路線形状が取得できない場合の停留所連結線ベースのフォールバック描画
+- `route_color` による路線色設定と、未設定時の自動色生成
+- 路線一覧の検索と路線ごとの表示切替
+- 停留所名検索と検索結果からの地図移動
+- 往復路線の統合表示と統合時カラーの選択
+- 停留所、車両、停留所連結線の表示切替
+- 停留所連結線の線幅変更（1～20）
+- GTFS-RT Vehicle Positions の定期取得と車両表示
+- 車両の方位、速度、路線などのポップアップ表示
+- OpenFreeMap の Liberty / Bright / Positron 切替
+- 現在の地図表示の PNG 保存
+- 表示設定と地図位置のブラウザ内保存（localStorage）
+- GTFS 読み込み中の進捗表示
+- 複数GTFSのメモリ上での登録・切替
 
 ## 技術構成
 
-- Backend: FastAPI
-- Frontend: MapLibre GL JS
-- Base Map: OpenFreeMap (Bright default, Liberty / Positron selectable)
-- Data Store: メモリ + SQLite（`data/linemap.db`）
-- Data Format: GeoJSON
+- Backend: Python / FastAPI
+- Frontend: HTML / CSS / JavaScript
+- Map: MapLibre GL JS 4.7.1
+- Base map: OpenFreeMap
+- Static data format: GeoJSON
+- Realtime data: GTFS-RT Vehicle Positions（Protocol Buffers）
+- Storage: SQLite による現在データの保存と、メモリ上の複数GTFS管理
+
+## 動作環境
+
+- Python 3.11 以降を推奨
+- インターネット接続（OpenFreeMapの地図タイルを利用する場合）
+- GTFS ZIP ファイル
+- GTFS-RT を利用する場合は、Vehicle Positions のURL
 
 ## セットアップ
 
-```bash
+PowerShell の例です。
+
+```powershell
 python -m venv .venv
-.venv\Scripts\activate
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+```
+
+仮想環境の有効化が制限されている場合は、以下のように仮想環境のPythonを直接使用できます。
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
 ## 起動
 
-```bash
+プロジェクトルートで実行します。
+
+```powershell
 uvicorn app.main:app --reload
 ```
 
-起動後、ブラウザで次を開きます。
+起動後、ブラウザで http://127.0.0.1:8000 を開きます。
 
-- http://127.0.0.1:8000
+別のポートを使う場合は、例えば次のように指定します。
+
+```powershell
+uvicorn app.main:app --reload --port 8001
+```
+
+`python app/main.py` でも起動できます。
+
+## 使い方
+
+### GTFSを読み込む
+
+1. 「GTFSアップロード」で `.zip` ファイルを選択します。
+2. 「GTFSを読み込む」を押します。
+3. 読み込み完了後、路線・停留所・停留所連結線が地図に表示されます。
+
+最低限、次のファイルが必要です。
+
+- `routes.txt`
+- `trips.txt`
+- `stops.txt`
+
+次のファイルは、存在する場合に利用されます。
+
+- `shapes.txt`: 路線の詳細形状
+- `stop_times.txt`: 停留所の順序と簡易時刻情報
+
+`shapes.txt` がない、または路線形状を生成できない場合は、`stop_times.txt` と停留所位置から停留所連結線を生成して路線表示に利用します。
+
+### 複数GTFSを切り替える
+
+アップロード時にAPIの `gtfs_id` を指定すると、複数のGTFSをメモリ上に登録できます。画面のGTFS選択欄から登録済みデータを切り替えます。
+
+```powershell
+curl.exe -F "file=@sample.zip" "http://127.0.0.1:8000/upload?gtfs_id=sample"
+```
+
+現在の実装では、複数GTFSの切替情報自体はメモリ上で管理されます。アプリを再起動すると、登録済みGTFS一覧は初期化されます。一方、現在選択中のGeoJSONなどは `data/linemap.db` に保存されます。
+
+### GTFS-RTを設定する
+
+1. 「GTFS-RT設定」のURLに Vehicle Positions の protobuf エンドポイントを入力します。
+2. 更新間隔を5～60秒で指定します。
+3. 「RT設定を保存」を押します。
+4. RT再接続が必要な場合は「RT再接続」を押します。
+
+画面には最終更新時刻、最終成功時刻、更新間隔、接続状態、連続エラー回数などが表示されます。
+
+### 表示を調整する
+
+- 路線一覧: 路線の検索と個別表示切替
+- 停留所検索: 停留所名で検索し、結果を選択して地図上へ移動
+- 往復路線の統合: 対応する往復路線を統合表示
+- 統合時カラー: route_id が小さい側または大きい側を採用
+- 停留所連結線: 表示切替と線幅変更
+- レイヤー表示: 停留所、車両、停留所連結線を個別に切替
+- 地図スタイル: Liberty、Bright、Positronを切替
+
+表示設定と地図位置はブラウザのlocalStorageに保存されます。
 
 ## API
 
-- `POST /upload` または `POST /upload_gtfs`: GTFS ZIPアップロード
-- `GET /routes`: 路線GeoJSON
-- `GET /route_catalog`: 路線一覧
-- `GET /stops`: 停留所GeoJSON
-- `GET /stop_connections`: 停留所連結線GeoJSON
-- `GET /vehicles`: 車両位置（GeoJSON + ステータス）
-- `POST /settings/gtfs_rt`: GTFS-RT URL/間隔設定
-- `GET /health`: ヘルスチェック
+### ヘルスチェック
 
-## 注意
+```http
+GET /health
+```
 
-- GTFS-RTは protobuf の Vehicle Positions フィードを想定しています。
-- 必須GTFSファイルは `routes.txt`, `trips.txt`, `stops.txt` です。`shapes.txt` があれば線形状を描画します。
+### GTFS
 
-## 使用ガイド
+```http
+POST /upload?gtfs_id=default
+POST /upload_gtfs?gtfs_id=default
+GET  /gtfs_list
+POST /gtfs/select?gtfs_id=default
+GET  /routes
+GET  /route_catalog
+GET  /stops
+GET  /stop_connections
+```
 
-### 1. GTFSデータの入力
+アップロードAPIのレスポンスには、`gtfs_id`、路線数、停留所数、停留所連結線数が含まれます。
 
-1. 「📊 データ入力」セクション > 「GTFSアップロード」から GTFS ZIPファイルを選択
-2. 「GTFSを読み込む」ボタンをクリック
-3. 読み込み完了後、地図に路線・停留所が表示されます
+### GTFS-RT
 
-**確認項目：**
-- 路線が地図上に表示されているか
-- 停留所が表示されているか
-- 左パネルの「🛣️ 路線一覧」に路線が一覧表示されているか
+```http
+GET  /vehicles
+POST /settings/gtfs_rt
+```
 
-### 2. GTFS-RT（リアルタイム車両位置）の設定
+設定リクエストの例:
 
-1. 「📊 データ入力」セクション > 「GTFS-RT設定」から以下を入力：
-   - **URL**: 車両位置フィードのProtobufエンドポイント
-   - **秒**: ポーリング間隔（5～60秒、デフォルト: 10秒）
-2. 「RT設定を保存」ボタンをクリック
-3. 数秒後に地図上に車両が矢印で表示されます
+```json
+{
+  "gtfs_rt_url": "https://example.com/vehiclePositions.pb",
+  "interval_sec": 10
+}
+```
 
-**確認項目：**
-- 車両が地図上に矢印で表示されているか
-- 矢印の向き（bearing）が正しいか
+`GET /vehicles` は車両GeoJSON相当のデータと、取得状態をまとめて返します。
 
-### 3. 表示設定
+## テストと検証
 
-#### 往復路線の統合表示
-- 「⚙️ 表示設定」 > 「往復路線の統合」にて、同方向の往復路線を1本の線で表示
-- 「統合時カラー」で、小さいroute_idと大きいroute_idのどちらをベースカラーにするか選択
+依存関係をインストールした仮想環境で実行します。
 
-#### 停留所連結線の太さ
-- スライダーまたは数値入力で線の太さを調整（1～20）
+```powershell
+.\.venv\Scripts\python.exe -m pytest
+```
 
-### 4. レイヤーの表示/非表示
+往復路線統合の判定テストだけを実行する場合:
 
-- 「👁️ レイヤー表示」セクションのボタンで各レイヤーの表示切替
-  - **停留所 ON/OFF**: 停留所アイコンの表示/非表示
-  - **車両 ON/OFF**: 車両矢印の表示/非表示
-  - **停留所連結線 ON/OFF**: 停留所間の接続線の表示/非表示
+```powershell
+.\.venv\Scripts\python.exe tests\test_route_merge.py
+```
 
-### 5. 画面のエクスポート
-
-1. 地図を見やすい状態に調整
-2. 「💾 エクスポート」 > 「現在表示をPNG保存」をクリック
-3. 自動的にPNGファイルがダウンロードされます（デバッグ情報は隠蔽）
-
-## トラブルシューティング
-
-### GTFSの読み込みに失敗した
-- **原因**: 必須ファイル (`routes.txt`, `trips.txt`, `stops.txt`) が不足している
-- **対処**: GTFS ZIPファイルの内容を確認し、必須ファイルが含まれているか確認してください
-
-### 路線が表示されない
-- **原因**: `shapes.txt` が不足しているか、読み込みデータの不正
-- **対処**: `shapes.txt` を追加するか、データの品質を確認してください
-- ただし、`shape_id` がない場合は停留所連結線で表示されます
-
-### 車両が表示されない
-- **原因**: GTFS-RT URLが不正、またはポーリング中にエラーが発生している
-- **対処**: 
-  - URLが正しいか確認（Protobuf形式のエンドポイント）
-  - ブラウザコンソール（F12）でエラーメッセージを確認
-
-### 地図が遅い、ハングしている
-- **原因**: 大規模GTFSデータの処理
-- **対処**:
-  - 小規模テストデータから始める
-  - 停留所連結線を一度非表示にして動作確認
-  - ブラウザのコンソールでパフォーマンス計測: `PerformanceMonitor.measureStopConnectionToggle()`
-
-## パフォーマンス計測
-
-ブラウザのコンソール（F12）で以下コマンドを実行してパフォーマンスを計測：
+ブラウザ上の表示切替性能を確認する場合は、開発者ツールのコンソールで次を実行できます。
 
 ```javascript
-// 停留所連結線の表示/非表示切替時間を計測
 PerformanceMonitor.measureStopConnectionToggle()
-
-// 停留所表示の切替時間を計測
 PerformanceMonitor.measureStopsToggle()
-
-// ヘルプを表示
 PerformanceMonitor.help()
 ```
 
-## 運用時チェックリスト
+## トラブルシューティング
 
-- GTFS ZIP投入前に `routes.txt`, `trips.txt`, `stops.txt` が含まれていることを確認する
-- アップロード後に `/routes`, `/stops`, `/stop_connections` の件数が極端に0件でないことを確認する
-- 往復統合ON/OFF時に表示件数と色が大きく崩れていないことをデバッグ表示で確認する
-- `shape_id` を共有する便を含むデータで停留所連結線が欠落しないことを確認する
-- GTFS-RT設定時は `/vehicles` の `status.last_error` が空であることを確認する
-- 大規模データ投入時は初回表示とレイヤー切替の体感速度を確認し、問題があればデータを分割して検証する
+### 起動できない
+
+- 仮想環境が有効か確認します。
+- `pip install -r requirements.txt` を再実行します。
+- ポート8000が使用中の場合は別ポートを指定します。
+
+### GTFSを読み込めない
+
+- ZIP内に `routes.txt`、`trips.txt`、`stops.txt` があるか確認します。
+- ZIP直下でなくサブフォルダーに配置されていても読み込めますが、ファイル名は正確である必要があります。
+- `stop_id`、緯度、経度が欠損した停留所は表示対象から除外されます。
+
+### 路線が表示されない
+
+- アップロード結果の `routes` が0になっていないか確認します。
+- `shapes.txt` と `stop_times.txt` の `shape_id`、`trip_id`、`route_id` の対応を確認します。
+- 路線形状がない場合は、停留所連結線を生成できるだけの停留所順序が必要です。
+- 路線一覧で対象路線が表示ONになっているか確認します。
+
+### レイヤーの切替が反映されない
+
+- ブラウザをハードリロードします。
+- 開発者ツールのコンソールでJavaScriptエラーを確認します。
+- GTFS読み込み完了後に操作します。
+- 停留所連結線は、往復路線の統合表示中は仕様上非表示になります。
+
+### 車両が表示されない
+
+- URLがGTFS-RT Vehicle Positions のprotobufフィードか確認します。
+- `/vehicles` の `status.last_error` とHTTPステータスを確認します。
+- フィードに位置情報、`trip_id`、または車両IDが含まれているか確認します。
+
+### 大きなGTFSで遅い
+
+- まず停留所連結線を非表示にして描画負荷を確認します。
+- `PerformanceMonitor` でレイヤー切替時間を計測します。
+- 路線数・停留所数・連結線数をアップロード結果とAPIレスポンスで確認します。
+
+## ディレクトリ構成
+
+```text
+app/
+  main.py       FastAPIアプリとAPI
+  gtfs.py       GTFS ZIP解析とGeoJSON生成
+  rt.py         GTFS-RT取得・車両状態管理
+  storage.py    SQLiteとメモリ上のデータ管理
+static/
+  index.html    画面構造
+  app.js        地図、API連携、表示設定
+  styles.css    画面スタイル
+  performance-monitor.js  表示切替性能計測
+data/
+  linemap.db    現在データの保存先
+tests/
+  test_route_merge.py     往復統合判定テスト
+  test_stop_search.html   停留所検索のブラウザテスト
+```
+
+## 既知の制約
+
+- GTFSの表記ゆれが大きい場合、往復路線の統合判定が意図と異なることがあります。
+- 統合表示の中間線は形状の近似処理を含むため、実道路上の経路と完全には一致しない場合があります。
+- GTFS-RTはVehicle Positionsを対象としており、Trip UpdatesやService Alertsは対象外です。
+- 複数GTFSの登録一覧は現在メモリ管理で、アプリ再起動後も保持する管理機能は未実装です。
+- OpenFreeMapの表示には外部タイルサービスへの接続が必要です。
+
+## 関連ドキュメント
+
+- [システム構成図](システム構成図.md)
+- [複数GTFS設計](docs/multi_gtfs_design.md)
+- [停留所検索設計](docs/stop_search_design.md)
+- [計画と課題](まとめる.md)
