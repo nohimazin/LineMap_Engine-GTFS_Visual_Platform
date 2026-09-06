@@ -1,4 +1,5 @@
 import asyncio
+import zipfile
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
@@ -83,8 +84,9 @@ async def upload_gtfs(file: UploadFile = File(...), gtfs_id: str = Query("defaul
     raw_zip = await file.read()
     try:
         parsed = parse_gtfs_zip(raw_zip)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ValueError, zipfile.BadZipFile) as exc:
+        detail = str(exc) or "有効なGTFS ZIPファイルを指定してください。"
+        raise HTTPException(status_code=400, detail=detail) from exc
 
     store.update_gtfs(
         routes_geojson=parsed["routes_geojson"],

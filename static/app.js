@@ -1,11 +1,30 @@
-const savedView = JSON.parse(localStorage.getItem("linemap:view") || "null");
-const savedState = JSON.parse(localStorage.getItem("linemap:state") || "{}");
+function readSavedJson(key, fallback) {
+  try {
+    const value = localStorage.getItem(key);
+    return value ? JSON.parse(value) : fallback;
+  } catch (error) {
+    console.warn(`保存済み設定の読み込みに失敗しました: ${key}`, error);
+    return fallback;
+  }
+}
+
+const savedView = readSavedJson("linemap:view", null);
+const savedState = readSavedJson("linemap:state", {});
 const UI_BUILD_VERSION = "2026-05-02-display-settings-v1";
 const BASEMAP_STYLES = {
   liberty: "https://tiles.openfreemap.org/styles/liberty",
   bright: "https://tiles.openfreemap.org/styles/bright",
   positron: "https://tiles.openfreemap.org/styles/positron",
 };
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
 
 function resolveInitialStyle(styleUrl) {
   const candidates = Object.values(BASEMAP_STYLES);
@@ -997,18 +1016,21 @@ function buildStopPopupHtml(properties) {
   const routes = Array.isArray(properties?.routes) ? properties.routes.filter(Boolean) : [];
   const times = Array.isArray(properties?.times) ? properties.times.filter(Boolean) : [];
 
-  const lines = [`<b>バス停名: ${title} (stop_id: ${stopId || "不明"})</b>`, `stop_id: ${stopId}`];
+  const lines = [
+    `停留所名: <span class="stop-popup-name">${escapeHtml(title)}</span>`,
+    `stop_id: ${escapeHtml(stopId || "不明")}`,
+  ];
   if (stopCode) {
-    lines.push(`標柱コード: ${stopCode}`);
+    lines.push(`標柱コード: ${escapeHtml(stopCode)}`);
   }
   if (parentStation) {
-    lines.push(`親停留所: ${parentStation}`);
+    lines.push(`親停留所: ${escapeHtml(parentStation)}`);
   }
   if (routes.length > 0) {
-    lines.push(`通過路線: ${routes.slice(0, 5).join(", ")}`);
+    lines.push(`通過路線: ${routes.slice(0, 5).map(escapeHtml).join(", ")}`);
   }
   if (times.length > 0) {
-    lines.push(`時刻(簡易): ${times.slice(0, 5).join(", ")}`);
+    lines.push(`時刻(簡易): ${times.slice(0, 5).map(escapeHtml).join(", ")}`);
   }
   return lines.join("<br/>");
 }
@@ -1022,7 +1044,7 @@ function buildStopPopupText(properties) {
   const routes = Array.isArray(properties?.routes) ? properties.routes.filter(Boolean) : [];
   const times = Array.isArray(properties?.times) ? properties.times.filter(Boolean) : [];
 
-  const lines = [`バス停名: ${title} (stop_id: ${stopId || "不明"})`, `stop_id: ${stopId}`];
+  const lines = [`停留所名: ${title}`, `stop_id: ${stopId || "不明"}`];
   if (stopCode) {
     lines.push(`標柱コード: ${stopCode}`);
   }
@@ -1079,14 +1101,13 @@ async function resolveStopPropertiesWithApiFallback(stopId, fallbackProperties) 
 }
 
 function performStopSearch(query) {
-  if (!query.trim()) {
-    return [];
-  }
-  const normalizedQuery = normalizeDisplayText(query);
+  const normalizedQuery = normalizeDisplayText(query).toLowerCase();
   return (state.stops.features || [])
     .filter((feature) => {
-      const stopName = normalizeDisplayText(feature?.properties?.stop_name || "");
-      return stopName.includes(normalizedQuery);
+      const properties = feature?.properties || {};
+      const stopName = normalizeDisplayText(properties.stop_name).toLowerCase();
+      const stopId = normalizeDisplayText(properties.stop_id).toLowerCase();
+      return !normalizedQuery || stopName.includes(normalizedQuery) || stopId.includes(normalizedQuery);
     })
     .slice(0, 30);
 }
@@ -1109,7 +1130,7 @@ function renderStopSearchResults(results) {
     const routeCount = (feature?.properties?.routes || []).length;
     item.textContent = `${stopName}${routeCount > 0 ? ` (路線: ${routeCount})` : ""}`;
     item.addEventListener("click", () => {
-      zoomToStop(feature.geometry.coordinates);
+      showStopPopup(feature.geometry.coordinates, feature.properties);
     });
     stopSearchList.appendChild(item);
   });
@@ -1123,12 +1144,22 @@ function renderStopSearchResults(results) {
   }
 }
 
-function zoomToStop(coordinates) {
+async function showStopPopup(coordinates, properties = {}) {
+  if (!Array.isArray(coordinates) || coordinates.length < 2) {
+    return;
+  }
+
+  const resolved = await resolveStopPropertiesWithApiFallback(properties.stop_id, properties);
   map.easeTo({
     center: [coordinates[0], coordinates[1]],
     zoom: 15,
     duration: 800,
   });
+
+  new maplibregl.Popup()
+    .setLngLat(coordinates)
+    .setHTML(buildStopPopupHtml(resolved))
+    .addTo(map);
 }
 
 async function refreshGtfsList() {
@@ -1201,16 +1232,17 @@ async function reloadAllData() {
   createLayersIfNeeded();
   refreshOverlayLayers();
   renderRouteList();
+  renderStopSearchResults(performStopSearch(stopSearchInput?.value || ""));
   applyDisplaySettings();
   updateDebugOverlay();
   renderRtStatus(vehiclesPayload.status);
   setGtfsLoadProgress(100, "GTFSデータの読み込みが完了しました。");
 }
 
-function uploadGtfsWithProgress(formData) {
+function uploadGtfsWithProgress(formData, gtfsId = "default") {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/upload");
+    xhr.open("POST", `/upload?gtfs_id=${encodeURIComponent(gtfsId)}`);
     xhr.responseType = "json";
 
     xhr.upload.onprogress = (event) => {
@@ -1248,6 +1280,7 @@ function uploadGtfsWithProgress(formData) {
 
 async function uploadGtfs() {
   const input = document.getElementById("gtfsZipInput");
+  const gtfsIdInput = document.getElementById("gtfsIdInput");
   const file = input.files?.[0];
   if (!file) {
     uploadResult.textContent = "ZIPファイルを選択してください。";
@@ -1256,10 +1289,11 @@ async function uploadGtfs() {
 
   const formData = new FormData();
   formData.append("file", file);
+  const gtfsId = gtfsIdInput.value.trim() || "default";
 
   try {
     setGtfsLoadProgress(5, "GTFSアップロードを開始しています...");
-    const result = await uploadGtfsWithProgress(formData);
+    const result = await uploadGtfsWithProgress(formData, gtfsId);
     setGtfsLoadProgress(70, "GTFSをサーバーで読み込み中...");
     uploadResult.textContent = `${result.message} routes=${result.routes}, stops=${result.stops}`;
     await reloadAllData();
@@ -1427,7 +1461,7 @@ function wireActions() {
     const name = `${p.route_short_name || ""} ${p.route_long_name || ""}`.trim();
     new maplibregl.Popup()
       .setLngLat(e.lngLat)
-      .setHTML(`<b>${name || p.route_id}</b><br/>route_id: ${p.route_id}`)
+      .setHTML(`<b>${escapeHtml(name || p.route_id)}</b><br/>route_id: ${escapeHtml(p.route_id)}`)
       .addTo(map);
   });
 
@@ -1435,11 +1469,7 @@ function wireActions() {
     const f = e.features?.[0];
     if (!f) return;
     const p = f.properties || {};
-    const resolved = await resolveStopPropertiesWithApiFallback(p.stop_id, p);
-    new maplibregl.Popup()
-      .setLngLat(e.lngLat)
-      .setText(buildStopPopupText(resolved))
-      .addTo(map);
+    await showStopPopup([e.lngLat.lng, e.lngLat.lat], p);
   });
 
   map.on("click", "stop-connections-line-hit", (e) => {
@@ -1450,7 +1480,7 @@ function wireActions() {
     new maplibregl.Popup()
       .setLngLat(e.lngLat)
       .setHTML(
-        `<b>停留所連結線</b><br/>路線名: ${routeName}<br/>route_id: ${p.route_id || ""}<br/>trip_id: ${p.trip_id || ""}`,
+        `<b>停留所連結線</b><br/>路線名: ${escapeHtml(routeName)}<br/>route_id: ${escapeHtml(p.route_id)}<br/>trip_id: ${escapeHtml(p.trip_id)}`,
       )
       .addTo(map);
   });
@@ -1462,15 +1492,17 @@ function wireActions() {
     const vehicleId = normalizeDisplayText(p.vehicle_id) || "不明";
     const tripId = normalizeDisplayText(p.trip_id) || "不明";
     const routeName = getRouteDisplayName(p.route_id) || "不明";
-    const bearing = p.bearing ? `${p.bearing.toFixed(1)}°` : "不明";
-    const speed = p.speed ? `${p.speed.toFixed(1)} m/s` : "不明";
+    const bearingValue = Number(p.bearing);
+    const speedValue = Number(p.speed);
+    const bearing = Number.isFinite(bearingValue) ? `${bearingValue.toFixed(1)}°` : "不明";
+    const speed = Number.isFinite(speedValue) ? `${speedValue.toFixed(1)} m/s` : "不明";
     const timestamp = p.timestamp ? new Date(p.timestamp * 1000).toLocaleTimeString('ja-JP') : "不明";
     
     const lines = [
       `<b>車両情報</b>`,
-      `ID: ${vehicleId}`,
-      `路線: ${routeName}`,
-      `trip_id: ${tripId}`,
+      `ID: ${escapeHtml(vehicleId)}`,
+      `路線: ${escapeHtml(routeName)}`,
+      `trip_id: ${escapeHtml(tripId)}`,
       `方位: ${bearing}`,
       `速度: ${speed}`,
       `更新時刻: ${timestamp}`,

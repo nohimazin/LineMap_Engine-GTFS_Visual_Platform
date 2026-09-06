@@ -374,6 +374,34 @@ button:hover {
 
 .maplibregl-popup-content {
   font-family: inherit;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 16px 38px 16px 16px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.maplibregl-popup-close-button {
+  width: auto;
+  min-width: 28px;
+  margin: 0;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 0 4px 0 4px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.maplibregl-popup-close-button:hover {
+  transform: none;
+  filter: none;
+  background: var(--accent-strong);
+}
+
+.stop-popup-name {
+  color: var(--accent-strong);
+  font-weight: 700;
 }
 
 .debug-overlay {
