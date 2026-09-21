@@ -78,6 +78,7 @@ const state = {
   stops: { type: "FeatureCollection", features: [] },
   stopConnections: { type: "FeatureCollection", features: [] },
   vehicles: { type: "FeatureCollection", features: [] },
+  hasFocusedVehicles: false,
   routeToGroup: {},
   groupToRoutes: {},
   visibleRouteIds: new Set(savedState.visibleRouteIds || []),
@@ -143,6 +144,8 @@ function updateDebugOverlay() {
     `visibleRouteIds: ${state.visibleRouteIds.size}`,
     `routes(features): ${state.routes.features?.length || 0}`,
     `stopConnections(features): ${state.stopConnections.features?.length || 0}`,
+    `vehicles(features): ${state.vehicles.features?.length || 0}`,
+    `vehicle-arrow: ${map.hasImage("vehicle-arrow") ? "registered" : "missing"}`,
     "",
     "Layer Visibility",
     `routes-line: ${getLayerVisibility("routes-line")}`,
@@ -336,6 +339,23 @@ function syncSourcesData() {
   map.getSource("vehicles")?.setData(state.vehicles);
 }
 
+function focusMapOnVehicles() {
+  if (state.hasFocusedVehicles) return;
+  const coordinates = (state.vehicles.features || [])
+    .map((feature) => feature?.geometry?.coordinates)
+    .filter((coordinate) => Array.isArray(coordinate) && coordinate.length >= 2)
+    .map(([longitude, latitude]) => [Number(longitude), Number(latitude)])
+    .filter(([longitude, latitude]) => Number.isFinite(longitude) && Number.isFinite(latitude));
+  if (!coordinates.length) return;
+
+  const bounds = coordinates.reduce(
+    (result, coordinate) => result.extend(coordinate),
+    new maplibregl.LngLatBounds(coordinates[0], coordinates[0]),
+  );
+  map.fitBounds(bounds, { padding: 80, maxZoom: 14, duration: 700 });
+  state.hasFocusedVehicles = true;
+}
+
 function applyLayerVisibility() {
   const stopConnectionsVisible = state.showStopConnections && !state.mergeRoundTrip;
   if (map.getLayer("stops-circle")) {
@@ -349,6 +369,9 @@ function applyLayerVisibility() {
   }
   if (map.getLayer("vehicles-symbol")) {
     map.setLayoutProperty("vehicles-symbol", "visibility", state.showVehicles ? "visible" : "none");
+  }
+  if (map.getLayer("vehicles-circle")) {
+    map.setLayoutProperty("vehicles-circle", "visibility", state.showVehicles ? "visible" : "none");
   }
     console.log("[applyLayerVisibility]", { showStops: state.showStops, showVehicles: state.showVehicles, showStopConnections: state.showStopConnections, mergeRoundTrip: state.mergeRoundTrip, stopConnectionsVisible });
     updateDebugOverlay();
@@ -896,6 +919,19 @@ function createLayersIfNeeded() {
   if (!map.getSource("vehicles")) {
     map.addSource("vehicles", { type: "geojson", data: state.vehicles });
     map.addLayer({
+      id: "vehicles-circle",
+      type: "circle",
+      source: "vehicles",
+      paint: {
+        "circle-radius": 7,
+        "circle-color": "#e4572e",
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 2,
+        "circle-opacity": 0.95,
+      },
+      layout: { visibility: state.showVehicles ? "visible" : "none" },
+    });
+    map.addLayer({
       id: "vehicles-symbol",
       type: "symbol",
       source: "vehicles",
@@ -1216,6 +1252,7 @@ async function reloadAllData() {
   state.stops = stops;
   state.rawStopConnections = stopConnections;
   state.vehicles = vehiclesPayload.vehicles;
+  focusMapOnVehicles();
 
   normalizeRouteDatasets();
   rebuildVisibleRouteIds();
@@ -1547,8 +1584,10 @@ map.on("load", async () => {
   setInterval(async () => {
     try {
       const payload = await api("/vehicles");
+      const hadVehicles = state.vehicles.features?.length > 0;
       state.vehicles = payload.vehicles;
       map.getSource("vehicles")?.setData(state.vehicles);
+      if (!hadVehicles) focusMapOnVehicles();
       renderRtStatus(payload.status);
     } catch (err) {
       setRtStatus(`RT取得失敗: ${err.message}`, "error");
