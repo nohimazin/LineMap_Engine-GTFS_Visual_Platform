@@ -151,8 +151,10 @@ def select_gtfs(gtfs_id: str) -> dict:
 
 
 @app.post("/settings/gtfs_rt")
-def update_gtfs_rt_settings(payload: RtConfigRequest) -> dict:
+async def update_gtfs_rt_settings(payload: RtConfigRequest) -> dict:
     rt_service.configure(str(payload.gtfs_rt_url) if payload.gtfs_rt_url else None, payload.interval_sec)
+    if payload.gtfs_rt_url:
+        await rt_service.fetch_once(store.trip_to_route())
     return {"message": "GTFS-RT設定を更新しました。", "status": rt_service.status()}
 
 

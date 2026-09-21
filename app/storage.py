@@ -55,28 +55,12 @@ class DataStore:
 
     def _load_from_db(self) -> None:
         persisted_gtfs_data = self._load_blob("gtfs_data", {})
-        if isinstance(persisted_gtfs_data, dict):
-            self._gtfs_data = persisted_gtfs_data
+        self._gtfs_data = persisted_gtfs_data if isinstance(persisted_gtfs_data, dict) else {}
         persisted_current_id = self._load_blob("current_gtfs_id", "default")
-        if isinstance(persisted_current_id, str):
-            self._current_gtfs_id = persisted_current_id
-
-        self._routes_geojson = self._load_blob("routes_geojson", self._routes_geojson)
-        self._stops_geojson = self._load_blob("stops_geojson", self._stops_geojson)
-        self._stop_connections_geojson = self._load_blob("stop_connections_geojson", self._stop_connections_geojson)
-        self._trip_to_route = self._load_blob("trip_to_route", self._trip_to_route)
-        self._route_catalog = self._load_blob("route_catalog", self._route_catalog)
+        self._current_gtfs_id = persisted_current_id if isinstance(persisted_current_id, str) else "default"
 
         if self._current_gtfs_id in self._gtfs_data:
             self.select_gtfs(self._current_gtfs_id)
-        elif self._route_catalog or self._routes_geojson.get("features"):
-            self._gtfs_data[self._current_gtfs_id] = {
-                "routes_geojson": self._routes_geojson,
-                "stops_geojson": self._stops_geojson,
-                "stop_connections_geojson": self._stop_connections_geojson,
-                "trip_to_route": self._trip_to_route,
-                "route_catalog": self._route_catalog,
-            }
 
     def list_gtfs(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -128,11 +112,6 @@ class DataStore:
             self._trip_to_route = trip_to_route
             self._route_catalog = route_catalog
 
-            self._save_blob("routes_geojson", routes_geojson)
-            self._save_blob("stops_geojson", stops_geojson)
-            self._save_blob("stop_connections_geojson", stop_connections_geojson)
-            self._save_blob("trip_to_route", trip_to_route)
-            self._save_blob("route_catalog", route_catalog)
             self._save_blob("gtfs_data", self._gtfs_data)
             self._save_blob("current_gtfs_id", self._current_gtfs_id)
 
