@@ -1,4 +1,6 @@
 import asyncio
+import gzip
+import math
 import time
 from typing import Any
 
@@ -60,8 +62,12 @@ class RealtimeVehicleService:
                 response.raise_for_status()
                 self._last_http_status = response.status_code
 
+            payload = response.content
+            if payload[:2] == b"\x1f\x8b":
+                payload = gzip.decompress(payload)
+
             feed = gtfs_realtime_pb2.FeedMessage()
-            feed.ParseFromString(response.content)
+            feed.ParseFromString(payload)
 
             features: list[dict[str, Any]] = []
             for entity in feed.entity:
@@ -73,6 +79,10 @@ class RealtimeVehicleService:
 
                 lat = vehicle.position.latitude
                 lon = vehicle.position.longitude
+                if not math.isfinite(lat) or not math.isfinite(lon):
+                    continue
+                if not -90 <= lat <= 90 or not -180 <= lon <= 180:
+                    continue
                 trip_id = vehicle.trip.trip_id if vehicle.HasField("trip") else ""
                 route_id = vehicle.trip.route_id if vehicle.HasField("trip") else ""
                 if not route_id and trip_id:
@@ -106,7 +116,8 @@ class RealtimeVehicleService:
     async def polling_loop(self, trip_to_route_getter) -> None:
         while True:
             try:
-                await self.fetch_once(trip_to_route_getter())
+                if self._url:
+                    await self.fetch_once(trip_to_route_getter())
             except Exception:  # noqa: BLE001
                 pass
             await asyncio.sleep(self._interval_sec)
@@ -124,5 +135,6 @@ class RealtimeVehicleService:
             "last_error_unix": self._last_error_unix,
             "last_http_status": self._last_http_status,
             "consecutive_error_count": self._consecutive_error_count,
+            "vehicle_count": len(self._vehicles.get("features", [])),
             "error_history": list(self._error_history),
         }

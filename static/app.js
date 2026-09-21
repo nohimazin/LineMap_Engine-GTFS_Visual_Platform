@@ -219,9 +219,10 @@ function renderRtStatus(status) {
   const lastSuccessText = formatRtLastUpdate(status?.last_success_unix);
   const intervalText = status?.interval_sec ? `${status.interval_sec}秒間隔` : "間隔未設定";
   const urlText = status?.url ? "接続設定あり" : "未設定";
+  const vehicleCountText = `車両 ${status?.vehicle_count ?? 0}台`;
   const retryText = status?.consecutive_error_count ? ` / 連続失敗 ${status.consecutive_error_count}回` : "";
   const httpText = status?.last_http_status ? ` / HTTP ${status.last_http_status}` : "";
-  setRtStatus(`RT更新: ${lastUpdateText} / 成功: ${lastSuccessText} / ${intervalText} / ${urlText}${retryText}${httpText}`, status?.url ? "ok" : "neutral");
+  setRtStatus(`RT更新: ${lastUpdateText} / 成功: ${lastSuccessText} / ${vehicleCountText} / ${intervalText} / ${urlText}${retryText}${httpText}`, status?.url ? "ok" : "neutral");
   if (rtErrorDetails) rtErrorDetails.textContent = formatRtErrorHistory(status);
 }
 
@@ -361,12 +362,11 @@ function syncDisplayControls() {
     toggleVehiclesBtn.textContent = state.showVehicles ? "車両 ON" : "車両 OFF";
   }
   if (toggleStopConnectionsBtn) {
-    toggleStopConnectionsBtn.disabled = state.mergeRoundTrip;
+    const settingText = state.showStopConnections ? "ON" : "OFF";
+    toggleStopConnectionsBtn.disabled = false;
     toggleStopConnectionsBtn.textContent = state.mergeRoundTrip
-      ? "停留所連結線（統合表示中は非表示）"
-      : state.showStopConnections
-        ? "停留所連結線 ON"
-        : "停留所連結線 OFF";
+      ? `停留所連結線 ${settingText}（統合表示中は非表示）`
+      : `停留所連結線 ${settingText}`;
   }
 }
 
@@ -695,22 +695,6 @@ function normalizeRouteDatasets() {
     }
   }
 
-  // Fallback: some GTFS feeds have no shapes/routes line geometry.
-  // In that case, use stop-connection geometries as route geometry source.
-  for (const feature of state.rawStopConnections.features || []) {
-    const rid = normalizeRouteId(feature?.properties?.route_id);
-    if (rid && !routeFeaturesByRouteId[rid]) {
-      routeFeaturesByRouteId[rid] = {
-        type: "Feature",
-        geometry: deepClone(feature.geometry),
-        properties: {
-          ...(feature.properties || {}),
-          route_id: rid,
-        },
-      };
-    }
-  }
-
   const mergedRouteFeatures = [];
   for (const mergedItem of mergedCatalog) {
     const memberRouteIds = mergedItem.member_route_ids || [];
@@ -938,9 +922,10 @@ function createLayersIfNeeded() {
 
 function updateRouteFilter() {
   if (!map.getLayer("routes-line")) return;
-  map.setFilter("routes-line", ["in", ["get", "route_id"], ["literal", Array.from(state.visibleRouteIds)]]);
+  const routeFilter = ["in", ["get", "route_id"], ["literal", Array.from(state.visibleRouteIds)]];
+  map.setFilter("routes-line", routeFilter);
   if (map.getLayer("routes-line-hit")) {
-    map.setFilter("routes-line-hit", ["in", ["get", "route_id"], ["literal", Array.from(state.visibleRouteIds)]]);
+    map.setFilter("routes-line-hit", routeFilter);
   }
   if (map.getLayer("stop-connections-line")) {
     map.setFilter("stop-connections-line", ["in", ["get", "route_id"], ["literal", Array.from(state.visibleRouteIds)]]);
