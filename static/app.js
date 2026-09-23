@@ -10,7 +10,8 @@ function readSavedJson(key, fallback) {
 
 const savedView = readSavedJson("linemap:view", null);
 const savedState = readSavedJson("linemap:state", {});
-const UI_BUILD_VERSION = "2026-05-02-display-settings-v1";
+const savedRtConfig = readSavedJson("linemap:rt-config", null);
+const UI_BUILD_VERSION = "2026-09-23-rt-display-v2";
 const BASEMAP_STYLES = {
   liberty: "https://tiles.openfreemap.org/styles/liberty",
   bright: "https://tiles.openfreemap.org/styles/bright",
@@ -46,6 +47,7 @@ async function retryRtConnection() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ gtfs_rt_url: url || null, interval_sec: interval }),
     });
+    saveRtConfig(url, interval);
 
     // 現在の状態を即座に取得して反映
     const payload = await api("/vehicles");
@@ -457,6 +459,10 @@ function saveMapView() {
     "linemap:view",
     JSON.stringify({ center: [center.lng, center.lat], zoom: map.getZoom() }),
   );
+}
+
+function saveRtConfig(url, interval) {
+  localStorage.setItem("linemap:rt-config", JSON.stringify({ url, interval }));
 }
 
 async function api(path, options = {}) {
@@ -1347,6 +1353,7 @@ async function saveRtConfig() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ gtfs_rt_url: url || null, interval_sec: interval }),
     });
+    saveRtConfig(url, interval);
     renderRtStatus(result.status);
   } catch (err) {
     setRtStatus(`保存失敗: ${err.message}`, "error");
@@ -1562,6 +1569,21 @@ map.on("load", async () => {
   ensureDebugOverlay();
   refreshOverlayLayers();
   wireActions();
+  if (savedRtConfig?.url) {
+    const interval = Number(savedRtConfig.interval || 10);
+    document.getElementById("rtUrlInput").value = savedRtConfig.url;
+    document.getElementById("rtIntervalInput").value = String(interval);
+    try {
+      const payload = await api("/settings/gtfs_rt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gtfs_rt_url: savedRtConfig.url, interval_sec: interval }),
+      });
+      renderRtStatus(payload.status);
+    } catch (err) {
+      setRtStatus(`RT設定の復元失敗: ${err.message}`, "error");
+    }
+  }
   rtStatus.textContent = "ベースマップを表示中...";
   setGtfsLoadProgress(5, "GTFSデータを読み込み中...", "初期化しています");
 
