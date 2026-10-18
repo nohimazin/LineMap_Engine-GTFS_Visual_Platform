@@ -88,6 +88,7 @@ const state = {
   showVehicles: savedState.showVehicles ?? true,
   showStopRouteIds: savedState.showStopRouteIds ?? false,
   showVehicleIds: savedState.showVehicleIds ?? false,
+  showVehicleBearing: savedState.showVehicleBearing ?? false,
   mergeRoundTrip: savedState.mergeRoundTrip ?? false,
   mergeColorSide: savedState.mergeColorSide || "first",
   stopConnectionsLineWidth: savedState.stopConnectionsLineWidth ?? 2.5,
@@ -246,6 +247,7 @@ function saveUiState() {
       showVehicles: state.showVehicles,
       showStopRouteIds: state.showStopRouteIds,
       showVehicleIds: state.showVehicleIds,
+      showVehicleBearing: state.showVehicleBearing,
       mergeRoundTrip: state.mergeRoundTrip,
       mergeColorSide: state.mergeColorSide,
       stopConnectionsLineWidth: state.stopConnectionsLineWidth,
@@ -366,12 +368,14 @@ function buildVehiclePopupText(properties = {}) {
     "車両情報",
     `車両ID: ${vehicleId}`,
     `路線: ${routeName}`,
-    `方位: ${bearing}`,
     `速度: ${speed}`,
     `更新時刻: ${timestamp}`,
   ];
   if (state.showVehicleIds) {
     lines.splice(3, 0, `route_id: ${routeId || "不明"}`, `trip_id: ${tripId}`);
+  }
+  if (state.showVehicleBearing) {
+    lines.splice(3 + (state.showVehicleIds ? 2 : 0), 0, `方位: ${bearing}`);
   }
   return lines.join("\n");
 }
@@ -1510,6 +1514,14 @@ function wireActions() {
     showVehicleIdsToggle.checked = state.showVehicleIds;
     showVehicleIdsToggle.addEventListener("change", () => {
       state.showVehicleIds = showVehicleIdsToggle.checked;
+      saveUiState();
+    });
+  }
+  const showVehicleBearingToggle = document.getElementById("showVehicleBearingToggle");
+  if (showVehicleBearingToggle) {
+    showVehicleBearingToggle.checked = state.showVehicleBearing;
+    showVehicleBearingToggle.addEventListener("change", () => {
+      state.showVehicleBearing = showVehicleBearingToggle.checked;
       saveUiState();
     });
   }
