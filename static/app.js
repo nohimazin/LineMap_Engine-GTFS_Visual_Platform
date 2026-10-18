@@ -346,24 +346,11 @@ function syncSourcesData() {
   syncVehicleMarkers();
 }
 
-function getVehicleRouteDisplayName(routeId) {
-  const normalizedRouteId = normalizeDisplayText(routeId);
-  if (!normalizedRouteId) return "不明路線";
-
-  const rawRoute = state.rawRouteCatalog.find((route) => route.route_id === normalizedRouteId);
-  const groupId = state.routeToGroup[normalizedRouteId];
-  const displayedRoute = groupId
-    ? state.routeCatalog.find((route) => route.route_id === groupId)
-    : rawRoute;
-  const name = `${displayedRoute?.route_short_name || ""} ${displayedRoute?.route_long_name || ""}`.trim();
-  return name || normalizedRouteId;
-}
-
 function buildVehiclePopupText(properties = {}) {
   const vehicleId = normalizeDisplayText(properties.vehicle_id) || "不明";
   const tripId = normalizeDisplayText(properties.trip_id) || "不明";
   const routeId = normalizeDisplayText(properties.route_id);
-  const routeName = getVehicleRouteDisplayName(routeId);
+  const routeName = getRouteDisplayLabel(routeId) || "不明";
   const bearingValue = Number(properties.bearing);
   const speedValue = Number(properties.speed);
   const bearing = Number.isFinite(bearingValue) ? `${bearingValue.toFixed(1)}°` : "不明";
@@ -375,15 +362,14 @@ function buildVehiclePopupText(properties = {}) {
 
   const lines = [
     "車両情報",
+    `車両ID: ${vehicleId}`,
     `路線: ${routeName}`,
     `方位: ${bearing}`,
     `速度: ${speed}`,
     `更新時刻: ${timestamp}`,
   ];
   if (state.showStopRouteIds) {
-    lines.splice(1, 0, `車両ID: ${vehicleId}`);
-    lines.splice(3, 0, `route_id: ${routeId || "不明"}`);
-    lines.splice(4, 0, `trip_id: ${tripId}`);
+    lines.splice(3, 0, `route_id: ${routeId || "不明"}`, `trip_id: ${tripId}`);
   }
   return lines.join("\n");
 }
@@ -1126,10 +1112,38 @@ function renderRouteList() {
 
 function getRouteDisplayName(routeId) {
   if (!routeId) return "不明路線";
-  const route = state.routeCatalog.find((item) => item.route_id === routeId);
+  const route = findRouteCatalogEntry(routeId);
   if (!route) return routeId;
   const name = `${route.route_short_name || ""} ${route.route_long_name || ""}`.trim();
   return name || routeId;
+}
+
+function findRouteCatalogEntry(routeId) {
+  const normalizedRouteId = normalizeDisplayText(routeId);
+  if (!normalizedRouteId) return null;
+  const catalogs = [state.routeCatalog, state.rawRouteCatalog];
+  for (const catalog of catalogs) {
+    const exact = catalog.find((item) => item.route_id === normalizedRouteId);
+    if (exact) return exact;
+  }
+
+  const routeKey = normalizedRouteId.replace(/_\d{8}$/, "");
+  if (routeKey === normalizedRouteId) return null;
+  for (const catalog of catalogs) {
+    const dateVariant = catalog.find((item) => String(item.route_id || "").replace(/_\d{8}$/, "") === routeKey);
+    if (dateVariant) return dateVariant;
+  }
+  return null;
+}
+
+function getRouteDisplayLabel(routeId) {
+  if (!routeId) return "不明路線";
+  const route = findRouteCatalogEntry(routeId);
+  if (!route) return routeId;
+  const shortName = normalizeDisplayText(route.route_short_name);
+  const longName = normalizeDisplayText(route.route_long_name);
+  if (shortName && longName) return `${shortName}：${longName}`;
+  return shortName || longName || routeId;
 }
 
 function normalizeDisplayText(value) {
