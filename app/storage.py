@@ -86,14 +86,40 @@ class DataStore:
         with self._lock:
             if gtfs_id not in self._gtfs_data:
                 return False
-            self._current_gtfs_id = gtfs_id
-            data = self._gtfs_data[gtfs_id]
-            self._agency_name = data.get("agency_name", "")
-            self._routes_geojson = data.get("routes_geojson", {"type": "FeatureCollection", "features": []})
-            self._stops_geojson = data.get("stops_geojson", {"type": "FeatureCollection", "features": []})
-            self._stop_connections_geojson = data.get("stop_connections_geojson", {"type": "FeatureCollection", "features": []})
-            self._trip_to_route = data.get("trip_to_route", {})
-            self._route_catalog = data.get("route_catalog", [])
+            self._activate_gtfs_unlocked(gtfs_id)
+            return True
+
+    def _activate_gtfs_unlocked(self, gtfs_id: str) -> None:
+        self._current_gtfs_id = gtfs_id
+        data = self._gtfs_data[gtfs_id]
+        self._agency_name = data.get("agency_name", "")
+        self._routes_geojson = data.get("routes_geojson", {"type": "FeatureCollection", "features": []})
+        self._stops_geojson = data.get("stops_geojson", {"type": "FeatureCollection", "features": []})
+        self._stop_connections_geojson = data.get("stop_connections_geojson", {"type": "FeatureCollection", "features": []})
+        self._trip_to_route = data.get("trip_to_route", {})
+        self._route_catalog = data.get("route_catalog", [])
+
+    def delete_gtfs(self, gtfs_id: str) -> bool:
+        with self._lock:
+            if gtfs_id not in self._gtfs_data:
+                return False
+
+            del self._gtfs_data[gtfs_id]
+            if gtfs_id == self._current_gtfs_id:
+                next_gtfs_id = sorted(self._gtfs_data.keys())[0] if self._gtfs_data else None
+                if next_gtfs_id:
+                    self._activate_gtfs_unlocked(next_gtfs_id)
+                else:
+                    self._current_gtfs_id = "default"
+                    self._agency_name = ""
+                    self._routes_geojson = {"type": "FeatureCollection", "features": []}
+                    self._stops_geojson = {"type": "FeatureCollection", "features": []}
+                    self._stop_connections_geojson = {"type": "FeatureCollection", "features": []}
+                    self._trip_to_route = {}
+                    self._route_catalog = []
+
+            self._save_blob("gtfs_data", self._gtfs_data)
+            self._save_blob("current_gtfs_id", self._current_gtfs_id)
             return True
 
     def update_gtfs(

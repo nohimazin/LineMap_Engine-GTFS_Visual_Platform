@@ -123,6 +123,16 @@ const openDatasetSettingsBtn = document.getElementById("openDatasetSettingsBtn")
 const closeDatasetSettingsBtn = document.getElementById("closeDatasetSettingsBtn");
 const cancelDatasetSettingsBtn = document.getElementById("cancelDatasetSettingsBtn");
 const saveDatasetSettingsBtn = document.getElementById("saveDatasetSettingsBtn");
+const deleteGtfsBtn = document.getElementById("deleteGtfsBtn");
+const gtfsUploadDialog = document.getElementById("gtfsUploadDialog");
+const openGtfsUploadBtn = document.getElementById("openGtfsUploadBtn");
+const closeGtfsUploadBtn = document.getElementById("closeGtfsUploadBtn");
+const cancelGtfsUploadBtn = document.getElementById("cancelGtfsUploadBtn");
+const uploadGtfsBtn = document.getElementById("uploadGtfsBtn");
+const gtfsUploadResult = document.getElementById("gtfsUploadResult");
+const gtfsUploadProgressWrap = document.getElementById("gtfsUploadProgressWrap");
+const gtfsUploadProgressBar = document.getElementById("gtfsUploadProgressBar");
+const gtfsUploadProgressText = document.getElementById("gtfsUploadProgressText");
 let debugOverlay = null;
 const vehicleMarkers = new Map();
 const debugEnabled = new URLSearchParams(window.location.search).get("debug") === "1";
@@ -1461,7 +1471,7 @@ async function uploadGtfs() {
   const gtfsIdInput = document.getElementById("gtfsIdInput");
   const file = input.files?.[0];
   if (!file) {
-    if (datasetSettingsResult) datasetSettingsResult.textContent = "ZIPファイルを選択してください。";
+    if (gtfsUploadResult) gtfsUploadResult.textContent = "ZIPファイルを選択してください。";
     return;
   }
 
@@ -1471,35 +1481,35 @@ async function uploadGtfs() {
 
   try {
     setGtfsLoadProgress(5, "GTFSアップロードを開始しています...");
+    if (gtfsUploadProgressWrap && gtfsUploadProgressBar && gtfsUploadProgressText) {
+      gtfsUploadProgressWrap.classList.remove("is-hidden");
+      gtfsUploadProgressBar.style.width = "5%";
+      gtfsUploadProgressText.textContent = "GTFSアップロードを開始しています...";
+    }
     const result = await uploadGtfsWithProgress(formData, gtfsId);
     setGtfsLoadProgress(70, "GTFSをサーバーで読み込み中...");
-    if (datasetSettingsResult) {
-      datasetSettingsResult.textContent = `${result.message} routes=${result.routes}, stops=${result.stops}`;
+    if (gtfsUploadResult) {
+      gtfsUploadResult.textContent = `${result.message} routes=${result.routes}, stops=${result.stops}`;
     }
     await reloadAllData();
     await refreshGtfsList();
+    if (gtfsSelect) gtfsSelect.value = gtfsId;
     return result;
   } catch (err) {
-    if (datasetSettingsResult) datasetSettingsResult.textContent = `失敗: ${err.message}`;
+    if (gtfsUploadResult) gtfsUploadResult.textContent = `失敗: ${err.message}`;
     setGtfsLoadProgress(100, "GTFSの読み込みに失敗しました。", String(err.message || ""));
     throw err;
   }
 }
 
 async function saveDatasetSettings() {
-  const file = document.getElementById("gtfsZipInput").files?.[0];
-  const gtfsIdInput = document.getElementById("gtfsIdInput");
   const selectedGtfs = document.getElementById("gtfsSelect").value;
   const url = document.getElementById("rtUrlInput").value.trim();
   const interval = Number(document.getElementById("rtIntervalInput").value || "10");
 
   try {
     if (datasetSettingsResult) datasetSettingsResult.textContent = "設定を保存しています...";
-    let gtfsId = selectedGtfs || "default";
-    if (file) {
-      gtfsId = gtfsIdInput.value.trim() || "default";
-      await uploadGtfs();
-    }
+    const gtfsId = selectedGtfs || "default";
 
     const result = await api("/settings/dataset", {
       method: "POST",
@@ -1522,9 +1532,35 @@ async function openDatasetSettings() {
   const status = await api("/vehicles");
   document.getElementById("rtUrlInput").value = status.status?.url || "";
   document.getElementById("rtIntervalInput").value = status.status?.interval_sec || 10;
-  document.getElementById("gtfsZipInput").value = "";
   if (datasetSettingsResult) datasetSettingsResult.textContent = "";
   datasetSettingsDialog?.showModal();
+}
+
+function openGtfsUpload() {
+  document.getElementById("gtfsIdInput").value = "default";
+  document.getElementById("gtfsZipInput").value = "";
+  if (gtfsUploadResult) gtfsUploadResult.textContent = "";
+  gtfsUploadDialog?.showModal();
+}
+
+async function deleteSelectedGtfs() {
+  const gtfsId = gtfsSelect?.value;
+  if (!gtfsId) {
+    return;
+  }
+  if (!window.confirm(`GTFS「${gtfsId}」を削除しますか？\nこの操作は取り消せません。`)) {
+    return;
+  }
+
+  try {
+    if (datasetSettingsResult) datasetSettingsResult.textContent = "GTFSを削除しています...";
+    await api(`/gtfs/delete?gtfs_id=${encodeURIComponent(gtfsId)}`, { method: "DELETE" });
+    await refreshGtfsList();
+    await reloadAllData();
+    if (datasetSettingsResult) datasetSettingsResult.textContent = `GTFS「${gtfsId}」を削除しました。`;
+  } catch (err) {
+    if (datasetSettingsResult) datasetSettingsResult.textContent = `削除失敗: ${err.message}`;
+  }
 }
 
 function wireActions() {
@@ -1534,6 +1570,20 @@ function wireActions() {
   closeDatasetSettingsBtn?.addEventListener("click", () => datasetSettingsDialog?.close());
   cancelDatasetSettingsBtn?.addEventListener("click", () => datasetSettingsDialog?.close());
   saveDatasetSettingsBtn?.addEventListener("click", saveDatasetSettings);
+  deleteGtfsBtn?.addEventListener("click", deleteSelectedGtfs);
+  openGtfsUploadBtn?.addEventListener("click", openGtfsUpload);
+  closeGtfsUploadBtn?.addEventListener("click", () => gtfsUploadDialog?.close());
+  cancelGtfsUploadBtn?.addEventListener("click", () => gtfsUploadDialog?.close());
+  uploadGtfsBtn?.addEventListener("click", async () => {
+    try {
+      const result = await uploadGtfs();
+      if (!result) return;
+      gtfsUploadDialog?.close();
+      if (datasetSettingsResult) datasetSettingsResult.textContent = "新しいGTFSを登録しました。内容を確認してまとめて保存してください。";
+    } catch (err) {
+      // uploadGtfs already renders the error in the upload dialog.
+    }
+  });
 
   if (gtfsSelect) {
     gtfsSelect.addEventListener("change", (event) => {

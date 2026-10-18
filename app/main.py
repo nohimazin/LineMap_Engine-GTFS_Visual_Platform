@@ -162,6 +162,16 @@ def select_gtfs(gtfs_id: str) -> dict:
     raise HTTPException(status_code=404, detail=f"GTFS {gtfs_id} が見つかりません")
 
 
+@app.delete("/gtfs/delete")
+def delete_gtfs(gtfs_id: str) -> dict:
+    if store.delete_gtfs(gtfs_id):
+        return {
+            "message": f"GTFS {gtfs_id} を削除しました",
+            "list": store.list_gtfs(),
+        }
+    raise HTTPException(status_code=404, detail=f"GTFS {gtfs_id} が見つかりません")
+
+
 @app.post("/settings/gtfs_rt")
 async def update_gtfs_rt_settings(payload: RtConfigRequest) -> dict:
     rt_service.configure(str(payload.gtfs_rt_url) if payload.gtfs_rt_url else None, payload.interval_sec)

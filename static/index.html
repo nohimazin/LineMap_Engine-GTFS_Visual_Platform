@@ -137,11 +137,8 @@
             <select id="gtfsSelect">
               <option value="default">デフォルト</option>
             </select>
-            <label for="gtfsIdInput">新しく保存するGTFS ID</label>
-            <input id="gtfsIdInput" placeholder="GTFS ID（例: city-a）" value="default" />
-            <label for="gtfsZipInput">GTFS ZIPファイル</label>
-            <input type="file" id="gtfsZipInput" accept=".zip" />
-            <p class="hint">ZIPを選ぶと、アップロード後にそのGTFSが使用対象になります。</p>
+            <button id="deleteGtfsBtn" class="danger-button" type="button">選択中のGTFSを削除</button>
+            <button id="openGtfsUploadBtn" class="secondary-button" type="button">新規GTFSをアップロード</button>
           </section>
 
           <section class="settings-section">
@@ -165,6 +162,37 @@
         <div class="settings-dialog-actions">
           <button id="cancelDatasetSettingsBtn" class="secondary-button" type="button">キャンセル</button>
           <button id="saveDatasetSettingsBtn" type="button">まとめて保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="gtfsUploadDialog" class="settings-dialog">
+      <form method="dialog" class="settings-dialog-panel">
+        <div class="settings-dialog-header">
+          <div>
+            <p class="eyebrow">NEW GTFS</p>
+            <h2>新規GTFSをアップロード</h2>
+          </div>
+          <button id="closeGtfsUploadBtn" class="dialog-close-button" type="button" aria-label="GTFSアップロード画面を閉じる">×</button>
+        </div>
+        <div class="settings-dialog-body">
+          <section class="settings-section">
+            <h3>GTFSファイル</h3>
+            <label for="gtfsIdInput">保存するGTFS ID</label>
+            <input id="gtfsIdInput" placeholder="GTFS ID（例: city-a）" value="default" />
+            <label for="gtfsZipInput">GTFS ZIPファイル</label>
+            <input type="file" id="gtfsZipInput" accept=".zip" />
+            <p class="hint">アップロード後、このGTFSが使用対象になります。</p>
+          </section>
+          <p id="gtfsUploadResult" class="hint" role="status"></p>
+          <div id="gtfsUploadProgressWrap" class="load-progress is-hidden" aria-live="polite">
+            <div class="load-progress-bar"><div id="gtfsUploadProgressBar"></div></div>
+            <p id="gtfsUploadProgressText" class="hint load-progress-text"></p>
+          </div>
+        </div>
+        <div class="settings-dialog-actions">
+          <button id="cancelGtfsUploadBtn" class="secondary-button" type="button">戻る</button>
+          <button id="uploadGtfsBtn" type="button">アップロード</button>
         </div>
       </form>
     </dialog>

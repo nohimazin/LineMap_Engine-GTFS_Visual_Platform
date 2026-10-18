@@ -233,6 +233,14 @@ button:hover {
   filter: brightness(1.08);
 }
 
+.danger-button {
+  background: #a94442;
+}
+
+.danger-button:hover {
+  background: #8f3432;
+}
+
 .inline-controls {
   display: flex;
   gap: 8px;
