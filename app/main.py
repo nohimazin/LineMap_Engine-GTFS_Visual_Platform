@@ -103,6 +103,8 @@ async def upload_gtfs(file: UploadFile = File(...), gtfs_id: str = Query("defaul
         agency_name=parsed["agency_name"],
         gtfs_id=gtfs_id,
     )
+    saved_rt_config = store.gtfs_rt_config()
+    rt_service.configure(saved_rt_config.get("gtfs_rt_url"), saved_rt_config.get("interval_sec", 10))
 
     return {
         "message": "GTFSを登録しました。",
@@ -152,12 +154,18 @@ def gtfs_list() -> dict:
 
 
 @app.post("/gtfs/select")
-def select_gtfs(gtfs_id: str) -> dict:
+async def select_gtfs(gtfs_id: str) -> dict:
     if store.select_gtfs(gtfs_id):
+        selected_rt_config = store.gtfs_rt_config()
+        rt_service.configure(selected_rt_config.get("gtfs_rt_url"), selected_rt_config.get("interval_sec", 10))
+        if selected_rt_config.get("gtfs_rt_url"):
+            await rt_service.fetch_once(store.trip_to_route())
         return {
             "message": f"GTFS {gtfs_id} を選択しました",
             "current": gtfs_id,
             "list": store.list_gtfs(),
+            "rt_config": selected_rt_config,
+            "status": rt_service.status(),
         }
     raise HTTPException(status_code=404, detail=f"GTFS {gtfs_id} が見つかりません")
 

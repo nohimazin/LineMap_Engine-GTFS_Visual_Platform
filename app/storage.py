@@ -70,6 +70,15 @@ class DataStore:
         if self._current_gtfs_id in self._gtfs_data:
             self.select_gtfs(self._current_gtfs_id)
 
+    @staticmethod
+    def _normalize_rt_config(config: Any) -> dict[str, Any]:
+        if not isinstance(config, dict):
+            return {"gtfs_rt_url": None, "interval_sec": 10}
+        return {
+            "gtfs_rt_url": config.get("gtfs_rt_url"),
+            "interval_sec": config.get("interval_sec", 10),
+        }
+
     def list_gtfs(self) -> list[dict[str, Any]]:
         with self._lock:
             return [
@@ -98,6 +107,7 @@ class DataStore:
         self._stop_connections_geojson = data.get("stop_connections_geojson", {"type": "FeatureCollection", "features": []})
         self._trip_to_route = data.get("trip_to_route", {})
         self._route_catalog = data.get("route_catalog", [])
+        self._gtfs_rt_config = self._normalize_rt_config(data.get("gtfs_rt_config", self._gtfs_rt_config))
 
     def delete_gtfs(self, gtfs_id: str) -> bool:
         with self._lock:
@@ -117,9 +127,11 @@ class DataStore:
                     self._stop_connections_geojson = {"type": "FeatureCollection", "features": []}
                     self._trip_to_route = {}
                     self._route_catalog = []
+                    self._gtfs_rt_config = {"gtfs_rt_url": None, "interval_sec": 10}
 
             self._save_blob("gtfs_data", self._gtfs_data)
             self._save_blob("current_gtfs_id", self._current_gtfs_id)
+            self._save_blob("gtfs_rt_config", self._gtfs_rt_config)
             return True
 
     def update_gtfs(
@@ -140,6 +152,9 @@ class DataStore:
                 "stop_connections_geojson": stop_connections_geojson,
                 "trip_to_route": trip_to_route,
                 "route_catalog": route_catalog,
+                "gtfs_rt_config": self._normalize_rt_config(
+                    self._gtfs_data.get(gtfs_id, {}).get("gtfs_rt_config", self._gtfs_rt_config)
+                ),
             }
             self._gtfs_data[gtfs_id] = data
             self._current_gtfs_id = gtfs_id
@@ -184,4 +199,7 @@ class DataStore:
     def update_gtfs_rt_config(self, gtfs_rt_url: str | None, interval_sec: int) -> None:
         with self._lock:
             self._gtfs_rt_config = {"gtfs_rt_url": gtfs_rt_url, "interval_sec": interval_sec}
+            if self._current_gtfs_id in self._gtfs_data:
+                self._gtfs_data[self._current_gtfs_id]["gtfs_rt_config"] = dict(self._gtfs_rt_config)
+                self._save_blob("gtfs_data", self._gtfs_data)
             self._save_blob("gtfs_rt_config", self._gtfs_rt_config)

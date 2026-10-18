@@ -1380,6 +1380,10 @@ async function selectGtfs(gtfsId) {
       method: "POST",
     });
 
+    const rtConfig = response.rt_config || {};
+    document.getElementById("rtUrlInput").value = rtConfig.gtfs_rt_url || "";
+    document.getElementById("rtIntervalInput").value = rtConfig.interval_sec || 10;
+    if (response.status) renderRtStatus(response.status);
     gtfsSelectResult.textContent = `✓ 切り替え完了: ${gtfsId}`;
     await reloadAllData();
   } catch (err) {
@@ -1586,8 +1590,8 @@ function wireActions() {
   });
 
   if (gtfsSelect) {
-    gtfsSelect.addEventListener("change", (event) => {
-      gtfsSelectResult.textContent = `選択中: ${event.target.value}`;
+    gtfsSelect.addEventListener("change", async (event) => {
+      await selectGtfs(event.target.value);
     });
   }
 

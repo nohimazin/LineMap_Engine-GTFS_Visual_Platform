@@ -51,6 +51,9 @@ class RealtimeVehicleService:
         self._url = url.strip() if url else None
         if interval_sec is not None:
             self._interval_sec = max(5, min(interval_sec, 60))
+        self._vehicles = {"type": "FeatureCollection", "features": []}
+        self._last_update_unix = None
+        self._last_success_unix = None
 
     async def fetch_once(self, trip_to_route: dict[str, str]) -> None:
         if not self._url:
