@@ -346,6 +346,55 @@ function syncSourcesData() {
   syncVehicleMarkers();
 }
 
+function getVehicleRouteDisplayName(routeId) {
+  const normalizedRouteId = normalizeDisplayText(routeId);
+  if (!normalizedRouteId) return "不明路線";
+
+  const rawRoute = state.rawRouteCatalog.find((route) => route.route_id === normalizedRouteId);
+  const groupId = state.routeToGroup[normalizedRouteId];
+  const displayedRoute = groupId
+    ? state.routeCatalog.find((route) => route.route_id === groupId)
+    : rawRoute;
+  const name = `${displayedRoute?.route_short_name || ""} ${displayedRoute?.route_long_name || ""}`.trim();
+  return name || normalizedRouteId;
+}
+
+function buildVehiclePopupText(properties = {}) {
+  const vehicleId = normalizeDisplayText(properties.vehicle_id) || "不明";
+  const tripId = normalizeDisplayText(properties.trip_id) || "不明";
+  const routeId = normalizeDisplayText(properties.route_id);
+  const routeName = getVehicleRouteDisplayName(routeId);
+  const bearingValue = Number(properties.bearing);
+  const speedValue = Number(properties.speed);
+  const bearing = Number.isFinite(bearingValue) ? `${bearingValue.toFixed(1)}°` : "不明";
+  const speed = Number.isFinite(speedValue) ? `${speedValue.toFixed(1)} m/s` : "不明";
+  const timestampValue = Number(properties.timestamp);
+  const timestamp = Number.isFinite(timestampValue) && timestampValue > 0
+    ? new Date(timestampValue * 1000).toLocaleString("ja-JP", { hour12: false })
+    : "不明";
+
+  const lines = [
+    "車両情報",
+    `路線: ${routeName}`,
+    `方位: ${bearing}`,
+    `速度: ${speed}`,
+    `更新時刻: ${timestamp}`,
+  ];
+  if (state.showStopRouteIds) {
+    lines.splice(1, 0, `車両ID: ${vehicleId}`);
+    lines.splice(3, 0, `route_id: ${routeId || "不明"}`);
+    lines.splice(4, 0, `trip_id: ${tripId}`);
+  }
+  return lines.join("\n");
+}
+
+function showVehiclePopup(coordinates, properties) {
+  new maplibregl.Popup()
+    .setLngLat(coordinates)
+    .setText(buildVehiclePopupText(properties))
+    .addTo(map);
+}
+
 function syncVehicleMarkers() {
   const activeIds = new Set();
   for (const [index, feature] of (state.vehicles.features || []).entries()) {
@@ -365,6 +414,10 @@ function syncVehicleMarkers() {
         element.className = "vehicle-marker";
         element.setAttribute("aria-label", `車両 ${markerId}`);
         element.title = `車両: ${markerId}`;
+        element.addEventListener("click", (event) => {
+          event.stopPropagation();
+          showVehiclePopup(element._vehicleCoordinates, element._vehicleProperties);
+        });
         marker = new maplibregl.Marker({ element, anchor: "center" });
         marker.setLngLat({ lng: longitude, lat: latitude });
         marker.addTo(map);
@@ -372,6 +425,8 @@ function syncVehicleMarkers() {
       } else {
         marker.setLngLat({ lng: longitude, lat: latitude });
       }
+      marker.getElement()._vehicleCoordinates = [longitude, latitude];
+      marker.getElement()._vehicleProperties = properties;
       marker.getElement().hidden = !state.showVehicles;
     } catch (error) {
       console.warn("車両Markerの描画をスキップしました", { markerId, longitude, latitude, error });
@@ -1586,29 +1641,7 @@ function wireActions() {
     const f = e.features?.[0];
     if (!f) return;
     const p = f.properties || {};
-    const vehicleId = normalizeDisplayText(p.vehicle_id) || "不明";
-    const tripId = normalizeDisplayText(p.trip_id) || "不明";
-    const routeName = getRouteDisplayName(p.route_id) || "不明";
-    const bearingValue = Number(p.bearing);
-    const speedValue = Number(p.speed);
-    const bearing = Number.isFinite(bearingValue) ? `${bearingValue.toFixed(1)}°` : "不明";
-    const speed = Number.isFinite(speedValue) ? `${speedValue.toFixed(1)} m/s` : "不明";
-    const timestamp = p.timestamp ? new Date(p.timestamp * 1000).toLocaleTimeString('ja-JP') : "不明";
-    
-    const lines = [
-      `<b>車両情報</b>`,
-      `ID: ${escapeHtml(vehicleId)}`,
-      `路線: ${escapeHtml(routeName)}`,
-      `trip_id: ${escapeHtml(tripId)}`,
-      `方位: ${bearing}`,
-      `速度: ${speed}`,
-      `更新時刻: ${timestamp}`,
-    ];
-    
-    new maplibregl.Popup()
-      .setLngLat(e.lngLat)
-      .setHTML(lines.join("<br/>"))
-      .addTo(map);
+    showVehiclePopup([e.lngLat.lng, e.lngLat.lat], p);
   });
 
   map.on("moveend", saveMapView);
