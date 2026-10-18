@@ -167,6 +167,18 @@ body {
   min-width: 0;
 }
 
+.dataset-card .card-header {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.dataset-card .hint {
+  margin-top: 6px;
+}
+
+.settings-open-button {
+  margin-top: 4px;
+}
+
 .card-group {
   display: flex;
   flex-direction: column;
@@ -411,6 +423,110 @@ button:hover {
   background: var(--accent-strong);
 }
 
+.settings-dialog {
+  width: min(680px, calc(100vw - 28px));
+  max-height: min(760px, calc(100dvh - 28px));
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  color: var(--ink);
+  background: #fbfdf8;
+  box-shadow: 0 24px 80px rgba(19, 45, 28, 0.28);
+}
+
+.settings-dialog::backdrop {
+  background: rgba(20, 35, 25, 0.46);
+  backdrop-filter: blur(3px);
+}
+
+.settings-dialog-panel {
+  display: flex;
+  flex-direction: column;
+  max-height: min(760px, calc(100dvh - 28px));
+}
+
+.settings-dialog-header,
+.settings-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-dialog-header h2 {
+  margin: 2px 0 0;
+  font-size: 1.2rem;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--accent-strong);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.dialog-close-button {
+  width: 34px;
+  height: 34px;
+  margin: 0;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--accent-strong);
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.dialog-close-button:hover {
+  background: rgba(31, 122, 85, 0.1);
+  transform: none;
+  filter: none;
+}
+
+.settings-dialog-body {
+  overflow-y: auto;
+  padding: 20px 22px;
+}
+
+.settings-section {
+  display: grid;
+  gap: 8px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-section h3 {
+  margin: 0 0 4px;
+  color: var(--accent-strong);
+  font-size: 0.92rem;
+}
+
+.settings-section label {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.settings-dialog-actions {
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
+}
+
+.settings-dialog-actions button {
+  width: auto;
+  min-width: 132px;
+  margin-top: 0;
+}
+
+.secondary-button {
+  background: #e7eee4;
+  color: var(--accent-strong);
+}
+
 .stop-popup-name {
   color: var(--accent-strong);
   font-weight: 700;
@@ -531,5 +647,21 @@ button:hover {
     right: 10px;
     bottom: 10px;
     font-size: 11px;
+  }
+
+  .settings-dialog-header,
+  .settings-dialog-actions,
+  .settings-dialog-body {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .settings-dialog-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .settings-dialog-actions button {
+    width: 100%;
   }
 }

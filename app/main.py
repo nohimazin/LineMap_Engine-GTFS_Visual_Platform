@@ -25,6 +25,10 @@ class RtConfigRequest(BaseModel):
     interval_sec: int = 10
 
 
+class DatasetSettingsRequest(RtConfigRequest):
+    gtfs_id: str = "default"
+
+
 store = DataStore()
 rt_service = RealtimeVehicleService()
 
@@ -33,6 +37,8 @@ static_dir = Path(__file__).resolve().parent.parent / "static"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    saved_rt_config = store.gtfs_rt_config()
+    rt_service.configure(saved_rt_config.get("gtfs_rt_url"), saved_rt_config.get("interval_sec", 10))
     polling_task = asyncio.create_task(rt_service.polling_loop(store.trip_to_route))
     try:
         yield
@@ -159,9 +165,27 @@ def select_gtfs(gtfs_id: str) -> dict:
 @app.post("/settings/gtfs_rt")
 async def update_gtfs_rt_settings(payload: RtConfigRequest) -> dict:
     rt_service.configure(str(payload.gtfs_rt_url) if payload.gtfs_rt_url else None, payload.interval_sec)
+    store.update_gtfs_rt_config(rt_service.status()["url"], rt_service.status()["interval_sec"])
     if payload.gtfs_rt_url:
         await rt_service.fetch_once(store.trip_to_route())
     return {"message": "GTFS-RT設定を更新しました。", "status": rt_service.status()}
+
+
+@app.post("/settings/dataset")
+async def update_dataset_settings(payload: DatasetSettingsRequest) -> dict:
+    if not store.select_gtfs(payload.gtfs_id):
+        raise HTTPException(status_code=404, detail=f"GTFS {payload.gtfs_id} が見つかりません")
+
+    rt_service.configure(str(payload.gtfs_rt_url) if payload.gtfs_rt_url else None, payload.interval_sec)
+    status = rt_service.status()
+    store.update_gtfs_rt_config(status["url"], status["interval_sec"])
+    if payload.gtfs_rt_url:
+        await rt_service.fetch_once(store.trip_to_route())
+    return {
+        "message": "GTFSとGTFS-RT設定を保存しました。",
+        "gtfs_id": payload.gtfs_id,
+        "status": rt_service.status(),
+    }
 
 
 if __name__ == "__main__":

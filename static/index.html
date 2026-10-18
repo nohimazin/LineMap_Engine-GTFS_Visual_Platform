@@ -31,43 +31,15 @@
           </select>
         </section>
 
-        <section class="card">
-          <h2>📁 GTFS選択</h2>
-          <select id="gtfsSelect">
-            <option value="default">デフォルト</option>
-          </select>
-          <p id="gtfsSelectResult" class="hint" style="font-size: 0.85em; margin-top: 4px;"></p>
-        </section>
-
-        <section class="card card-group">
-          <h2>📊 データ入力</h2>
-          <div class="card-subsection">
-            <h3>GTFSアップロード</h3>
-            <input id="gtfsIdInput" placeholder="GTFS ID（例: city-a）" value="default" />
-            <input type="file" id="gtfsZipInput" accept=".zip" />
-            <button id="uploadBtn">GTFSを読み込む</button>
-            <p id="uploadResult" class="hint"></p>
-            <div id="gtfsLoadProgressWrap" class="load-progress is-hidden" aria-live="polite">
-              <div class="load-progress-bar">
-                <div id="gtfsLoadProgressBar"></div>
-              </div>
-              <p id="gtfsLoadProgressText" class="hint load-progress-text"></p>
-            </div>
+        <section class="card dataset-card">
+          <div class="card-header">
+            <h2>📁 データセット</h2>
+            <span id="gtfsSelectResult" class="hint"></span>
           </div>
-          <div class="card-subsection">
-            <h3>GTFS-RT設定</h3>
-            <input id="rtUrlInput" placeholder="https://example.com/vehiclePositions.pb" />
-            <div class="inline-controls rt-interval-row">
-              <input id="rtIntervalInput" type="number" min="5" max="60" value="10" />
-              <span>秒</span>
-            </div>
-            <div class="inline-controls">
-              <button id="rtSaveBtn">RT設定を保存</button>
-              <button id="rtRetryBtn">RT再接続</button>
-            </div>
-            <p id="rtStatus" class="hint"></p>
-            <pre id="rtErrorDetails" class="hint" style="white-space: pre-wrap; font-family: inherit; margin-top:6px;"></pre>
-          </div>
+          <button id="openDatasetSettingsBtn" class="settings-open-button" type="button">GTFS / GTFS-RT設定を開く</button>
+          <p class="hint">GTFSとリアルタイム車両情報をまとめて設定・保存します。</p>
+          <p id="rtStatus" class="hint"></p>
+          <pre id="rtErrorDetails" class="hint" style="white-space: pre-wrap; font-family: inherit; margin-top:6px;"></pre>
         </section>
 
         <section class="card grow">
@@ -147,6 +119,55 @@
         <div id="map"></div>
       </main>
     </div>
+
+    <dialog id="datasetSettingsDialog" class="settings-dialog">
+      <form method="dialog" class="settings-dialog-panel">
+        <div class="settings-dialog-header">
+          <div>
+            <p class="eyebrow">DATASET SETTINGS</p>
+            <h2>GTFS / GTFS-RT設定</h2>
+          </div>
+          <button id="closeDatasetSettingsBtn" class="dialog-close-button" type="button" aria-label="設定画面を閉じる">×</button>
+        </div>
+
+        <div class="settings-dialog-body">
+          <section class="settings-section">
+            <h3>GTFSデータ</h3>
+            <label for="gtfsSelect">使用するGTFS</label>
+            <select id="gtfsSelect">
+              <option value="default">デフォルト</option>
+            </select>
+            <label for="gtfsIdInput">新しく保存するGTFS ID</label>
+            <input id="gtfsIdInput" placeholder="GTFS ID（例: city-a）" value="default" />
+            <label for="gtfsZipInput">GTFS ZIPファイル</label>
+            <input type="file" id="gtfsZipInput" accept=".zip" />
+            <p class="hint">ZIPを選ぶと、アップロード後にそのGTFSが使用対象になります。</p>
+          </section>
+
+          <section class="settings-section">
+            <h3>GTFS-RT車両情報</h3>
+            <label for="rtUrlInput">Vehicle Positions URL</label>
+            <input id="rtUrlInput" type="url" placeholder="https://example.com/vehiclePositions.pb" />
+            <label for="rtIntervalInput">更新間隔</label>
+            <div class="inline-controls rt-interval-row">
+              <input id="rtIntervalInput" type="number" min="5" max="60" value="10" />
+              <span>秒</span>
+            </div>
+            <p class="hint">空欄で保存するとGTFS-RTを停止します。</p>
+          </section>
+          <p id="datasetSettingsResult" class="hint" role="status"></p>
+          <div id="gtfsLoadProgressWrap" class="load-progress is-hidden" aria-live="polite">
+            <div class="load-progress-bar"><div id="gtfsLoadProgressBar"></div></div>
+            <p id="gtfsLoadProgressText" class="hint load-progress-text"></p>
+          </div>
+        </div>
+
+        <div class="settings-dialog-actions">
+          <button id="cancelDatasetSettingsBtn" class="secondary-button" type="button">キャンセル</button>
+          <button id="saveDatasetSettingsBtn" type="button">まとめて保存</button>
+        </div>
+      </form>
+    </dialog>
 
     <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
     <script src="/static/performance-monitor.js?v=20260502f"></script>

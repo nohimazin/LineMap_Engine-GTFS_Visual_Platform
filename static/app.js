@@ -100,7 +100,7 @@ const routeList = document.getElementById("routeList");
 const routeSearchInput = document.getElementById("routeSearchInput");
 const stopSearchInput = document.getElementById("stopSearchInput");
 const stopSearchList = document.getElementById("stopSearchList");
-const uploadResult = document.getElementById("uploadResult");
+const datasetSettingsResult = document.getElementById("datasetSettingsResult");
 const gtfsLoadProgressWrap = document.getElementById("gtfsLoadProgressWrap");
 const gtfsLoadProgressBar = document.getElementById("gtfsLoadProgressBar");
 const gtfsLoadProgressText = document.getElementById("gtfsLoadProgressText");
@@ -118,6 +118,11 @@ const showStopRouteIdsToggle = document.getElementById("showStopRouteIdsToggle")
 const toggleStopsBtn = document.getElementById("toggleStopsBtn");
 const toggleVehiclesBtn = document.getElementById("toggleVehiclesBtn");
 const toggleStopConnectionsBtn = document.getElementById("toggleStopConnectionsBtn");
+const datasetSettingsDialog = document.getElementById("datasetSettingsDialog");
+const openDatasetSettingsBtn = document.getElementById("openDatasetSettingsBtn");
+const closeDatasetSettingsBtn = document.getElementById("closeDatasetSettingsBtn");
+const cancelDatasetSettingsBtn = document.getElementById("cancelDatasetSettingsBtn");
+const saveDatasetSettingsBtn = document.getElementById("saveDatasetSettingsBtn");
 let debugOverlay = null;
 const vehicleMarkers = new Map();
 const debugEnabled = new URLSearchParams(window.location.search).get("debug") === "1";
@@ -1336,6 +1341,7 @@ async function refreshGtfsList() {
     const response = await api("/gtfs_list");
     const gtfsList = response.gtfs_list || [];
 
+    if (!gtfsSelect) return;
     gtfsSelect.innerHTML = "";
     gtfsList.forEach((item) => {
       const option = document.createElement("option");
@@ -1455,7 +1461,7 @@ async function uploadGtfs() {
   const gtfsIdInput = document.getElementById("gtfsIdInput");
   const file = input.files?.[0];
   if (!file) {
-    uploadResult.textContent = "ZIPファイルを選択してください。";
+    if (datasetSettingsResult) datasetSettingsResult.textContent = "ZIPファイルを選択してください。";
     return;
   }
 
@@ -1467,40 +1473,71 @@ async function uploadGtfs() {
     setGtfsLoadProgress(5, "GTFSアップロードを開始しています...");
     const result = await uploadGtfsWithProgress(formData, gtfsId);
     setGtfsLoadProgress(70, "GTFSをサーバーで読み込み中...");
-    uploadResult.textContent = `${result.message} routes=${result.routes}, stops=${result.stops}`;
+    if (datasetSettingsResult) {
+      datasetSettingsResult.textContent = `${result.message} routes=${result.routes}, stops=${result.stops}`;
+    }
     await reloadAllData();
     await refreshGtfsList();
+    return result;
   } catch (err) {
-    uploadResult.textContent = `失敗: ${err.message}`;
+    if (datasetSettingsResult) datasetSettingsResult.textContent = `失敗: ${err.message}`;
     setGtfsLoadProgress(100, "GTFSの読み込みに失敗しました。", String(err.message || ""));
+    throw err;
   }
 }
 
-async function saveRtConfig() {
+async function saveDatasetSettings() {
+  const file = document.getElementById("gtfsZipInput").files?.[0];
+  const gtfsIdInput = document.getElementById("gtfsIdInput");
+  const selectedGtfs = document.getElementById("gtfsSelect").value;
   const url = document.getElementById("rtUrlInput").value.trim();
   const interval = Number(document.getElementById("rtIntervalInput").value || "10");
 
   try {
-    const result = await api("/settings/gtfs_rt", {
+    if (datasetSettingsResult) datasetSettingsResult.textContent = "設定を保存しています...";
+    let gtfsId = selectedGtfs || "default";
+    if (file) {
+      gtfsId = gtfsIdInput.value.trim() || "default";
+      await uploadGtfs();
+    }
+
+    const result = await api("/settings/dataset", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ gtfs_rt_url: url || null, interval_sec: interval }),
+      body: JSON.stringify({ gtfs_id: gtfsId, gtfs_rt_url: url || null, interval_sec: interval }),
     });
     renderRtStatus(result.status);
+    await refreshGtfsList();
+    await reloadAllData();
+    if (datasetSettingsResult) datasetSettingsResult.textContent = "GTFSとGTFS-RT設定を保存しました。";
+    datasetSettingsDialog?.close();
   } catch (err) {
     setRtStatus(`保存失敗: ${err.message}`, "error");
+    if (datasetSettingsResult) datasetSettingsResult.textContent = `保存失敗: ${err.message}`;
   }
 }
 
+async function openDatasetSettings() {
+  await refreshGtfsList();
+  const status = await api("/vehicles");
+  document.getElementById("rtUrlInput").value = status.status?.url || "";
+  document.getElementById("rtIntervalInput").value = status.status?.interval_sec || 10;
+  document.getElementById("gtfsZipInput").value = "";
+  if (datasetSettingsResult) datasetSettingsResult.textContent = "";
+  datasetSettingsDialog?.showModal();
+}
+
 function wireActions() {
-  document.getElementById("uploadBtn").addEventListener("click", uploadGtfs);
-  document.getElementById("rtSaveBtn").addEventListener("click", saveRtConfig);
-  const rtRetryBtn = document.getElementById("rtRetryBtn");
-  if (rtRetryBtn) rtRetryBtn.addEventListener("click", retryRtConnection);
+  openDatasetSettingsBtn?.addEventListener("click", () => {
+    openDatasetSettings().catch((err) => setRtStatus(`設定画面を開けませんでした: ${err.message}`, "error"));
+  });
+  closeDatasetSettingsBtn?.addEventListener("click", () => datasetSettingsDialog?.close());
+  cancelDatasetSettingsBtn?.addEventListener("click", () => datasetSettingsDialog?.close());
+  saveDatasetSettingsBtn?.addEventListener("click", saveDatasetSettings);
 
   if (gtfsSelect) {
-    gtfsSelect.addEventListener("change", async (event) => {
-      await selectGtfs(event.target.value);
+    gtfsSelect.addEventListener("change", (event) => {
+      gtfsSelectResult.textContent = `選択中: ${event.target.value}`;
     });
   }
 

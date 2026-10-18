@@ -11,6 +11,7 @@ class DataStore:
         self._gtfs_data: dict[str, dict[str, Any]] = {}
         self._current_gtfs_id: str = "default"
         self._agency_name: str = ""
+        self._gtfs_rt_config: dict[str, Any] = {"gtfs_rt_url": None, "interval_sec": 10}
         self._routes_geojson: dict[str, Any] = {"type": "FeatureCollection", "features": []}
         self._stops_geojson: dict[str, Any] = {"type": "FeatureCollection", "features": []}
         self._stop_connections_geojson: dict[str, Any] = {"type": "FeatureCollection", "features": []}
@@ -59,6 +60,12 @@ class DataStore:
         self._gtfs_data = persisted_gtfs_data if isinstance(persisted_gtfs_data, dict) else {}
         persisted_current_id = self._load_blob("current_gtfs_id", "default")
         self._current_gtfs_id = persisted_current_id if isinstance(persisted_current_id, str) else "default"
+        persisted_rt_config = self._load_blob("gtfs_rt_config", self._gtfs_rt_config)
+        if isinstance(persisted_rt_config, dict):
+            self._gtfs_rt_config = {
+                "gtfs_rt_url": persisted_rt_config.get("gtfs_rt_url"),
+                "interval_sec": persisted_rt_config.get("interval_sec", 10),
+            }
 
         if self._current_gtfs_id in self._gtfs_data:
             self.select_gtfs(self._current_gtfs_id)
@@ -143,3 +150,12 @@ class DataStore:
     def agency_name(self) -> str:
         with self._lock:
             return self._agency_name
+
+    def gtfs_rt_config(self) -> dict[str, Any]:
+        with self._lock:
+            return dict(self._gtfs_rt_config)
+
+    def update_gtfs_rt_config(self, gtfs_rt_url: str | None, interval_sec: int) -> None:
+        with self._lock:
+            self._gtfs_rt_config = {"gtfs_rt_url": gtfs_rt_url, "interval_sec": interval_sec}
+            self._save_blob("gtfs_rt_config", self._gtfs_rt_config)
