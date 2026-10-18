@@ -9,24 +9,15 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, HttpUrl
 
-try:
-    from app.gtfs import parse_gtfs_zip
-    from app.rt import RealtimeVehicleService
-    from app.storage import DataStore
-except ModuleNotFoundError:
-    # Supports direct execution like: python app/main.py
-    from gtfs import parse_gtfs_zip
-    from rt import RealtimeVehicleService
-    from storage import DataStore
+from app.gtfs import parse_gtfs_zip
+from app.rt import RealtimeVehicleService
+from app.storage import DataStore
 
 
-class RtConfigRequest(BaseModel):
+class DatasetSettingsRequest(BaseModel):
+    gtfs_id: str = "default"
     gtfs_rt_url: HttpUrl | None = None
     interval_sec: int = 10
-
-
-class DatasetSettingsRequest(RtConfigRequest):
-    gtfs_id: str = "default"
 
 
 store = DataStore()
@@ -82,7 +73,6 @@ def health() -> dict[str, str]:
 
 
 @app.post("/upload")
-@app.post("/upload_gtfs")
 async def upload_gtfs(file: UploadFile = File(...), gtfs_id: str = Query("default")) -> dict[str, int | str]:
     if not file.filename.lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="GTFS ZIPファイルを指定してください。")
@@ -178,15 +168,6 @@ def delete_gtfs(gtfs_id: str) -> dict:
             "list": store.list_gtfs(),
         }
     raise HTTPException(status_code=404, detail=f"GTFS {gtfs_id} が見つかりません")
-
-
-@app.post("/settings/gtfs_rt")
-async def update_gtfs_rt_settings(payload: RtConfigRequest) -> dict:
-    rt_service.configure(str(payload.gtfs_rt_url) if payload.gtfs_rt_url else None, payload.interval_sec)
-    store.update_gtfs_rt_config(rt_service.status()["url"], rt_service.status()["interval_sec"])
-    if payload.gtfs_rt_url:
-        await rt_service.fetch_once(store.trip_to_route())
-    return {"message": "GTFS-RT設定を更新しました。", "status": rt_service.status()}
 
 
 @app.post("/settings/dataset")
