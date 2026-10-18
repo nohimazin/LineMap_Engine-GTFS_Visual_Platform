@@ -79,6 +79,7 @@ const state = {
   stops: { type: "FeatureCollection", features: [] },
   stopConnections: { type: "FeatureCollection", features: [] },
   vehicles: { type: "FeatureCollection", features: [] },
+  agencyName: "",
   hasFocusedVehicles: false,
   routeToGroup: {},
   groupToRoutes: {},
@@ -350,8 +351,9 @@ function syncSourcesData() {
   syncVehicleMarkers();
 }
 
-function buildVehiclePopupText(properties = {}) {
+function buildVehiclePopupHtml(properties = {}) {
   const vehicleId = normalizeDisplayText(properties.vehicle_id) || "不明";
+  const vehicleLabel = normalizeDisplayText(properties.vehicle_label) || vehicleId;
   const tripId = normalizeDisplayText(properties.trip_id) || "不明";
   const routeId = normalizeDisplayText(properties.route_id);
   const routeName = getRouteDisplayLabel(routeId) || "不明";
@@ -363,27 +365,31 @@ function buildVehiclePopupText(properties = {}) {
   const timestamp = Number.isFinite(timestampValue) && timestampValue > 0
     ? new Date(timestampValue * 1000).toLocaleString("ja-JP", { hour12: false })
     : "不明";
+  const searchText = `${state.agencyName} ${vehicleLabel}`.trim();
+  const vehicleNumber = state.agencyName && vehicleLabel !== "不明"
+    ? `<a href="https://www.google.com/search?q=${encodeURIComponent(searchText)}" target="_blank" rel="noopener noreferrer">車両番号: ${escapeHtml(vehicleLabel)}</a>`
+    : `車両番号: ${escapeHtml(vehicleLabel)}`;
 
   const lines = [
     "車両情報",
-    `車両ID: ${vehicleId}`,
-    `路線: ${routeName}`,
-    `速度: ${speed}`,
-    `更新時刻: ${timestamp}`,
+    vehicleNumber,
+    `路線: ${escapeHtml(routeName)}`,
+    `速度: ${escapeHtml(speed)}`,
+    `更新時刻: ${escapeHtml(timestamp)}`,
   ];
   if (state.showVehicleIds) {
-    lines.splice(3, 0, `route_id: ${routeId || "不明"}`, `trip_id: ${tripId}`);
+    lines.splice(2, 0, `vehicle_id: ${escapeHtml(vehicleId)}`, `route_id: ${escapeHtml(routeId || "不明")}`, `trip_id: ${escapeHtml(tripId)}`);
   }
   if (state.showVehicleBearing) {
-    lines.splice(3 + (state.showVehicleIds ? 2 : 0), 0, `方位: ${bearing}`);
+    lines.splice(3 + (state.showVehicleIds ? 3 : 0), 0, `方位: ${escapeHtml(bearing)}`);
   }
-  return lines.join("\n");
+  return lines.join("<br/>");
 }
 
 function showVehiclePopup(coordinates, properties) {
   new maplibregl.Popup()
     .setLngLat(coordinates)
-    .setText(buildVehiclePopupText(properties))
+    .setHTML(buildVehiclePopupHtml(properties))
     .addTo(map);
 }
 
@@ -1375,6 +1381,7 @@ async function reloadAllData() {
   const stops = await api("/stops");
   setGtfsLoadProgress(70, "GTFSデータを読み込み中...", "停留所連結線を取得しています");
   const stopConnections = await api("/stop_connections");
+  const agencyPayload = await api("/agency");
   setGtfsLoadProgress(90, "GTFSデータを読み込み中...", "車両情報を取得しています");
   const vehiclesPayload = await api("/vehicles");
 
@@ -1382,6 +1389,7 @@ async function reloadAllData() {
   state.rawRouteCatalog = routeCatalog;
   state.stops = stops;
   state.rawStopConnections = stopConnections;
+  state.agencyName = agencyPayload.agency_name || "";
   state.vehicles = vehiclesPayload.vehicles;
   focusMapOnVehicles();
 

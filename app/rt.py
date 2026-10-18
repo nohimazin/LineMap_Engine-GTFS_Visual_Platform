@@ -89,8 +89,11 @@ class RealtimeVehicleService:
                     route_id = trip_to_route.get(trip_id, "")
 
                 vehicle_id = ""
+                vehicle_label = ""
                 if vehicle.HasField("vehicle") and vehicle.vehicle.HasField("id"):
                     vehicle_id = vehicle.vehicle.id
+                if vehicle.HasField("vehicle") and vehicle.vehicle.HasField("label"):
+                    vehicle_label = vehicle.vehicle.label
 
                 bearing = vehicle.position.bearing if vehicle.position.HasField("bearing") else 0.0
                 speed = vehicle.position.speed if vehicle.position.HasField("speed") else 0.0
@@ -101,6 +104,7 @@ class RealtimeVehicleService:
                         "geometry": {"type": "Point", "coordinates": [lon, lat]},
                         "properties": {
                             "vehicle_id": vehicle_id,
+                            "vehicle_label": vehicle_label,
                             "trip_id": trip_id,
                             "route_id": route_id,
                             "bearing": bearing,

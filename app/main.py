@@ -94,6 +94,7 @@ async def upload_gtfs(file: UploadFile = File(...), gtfs_id: str = Query("defaul
         stop_connections_geojson=parsed["stop_connections_geojson"],
         trip_to_route=parsed["trip_to_route"],
         route_catalog=parsed["route_catalog"],
+        agency_name=parsed["agency_name"],
         gtfs_id=gtfs_id,
     )
 
@@ -124,6 +125,11 @@ def stops() -> dict:
 @app.get("/stop_connections")
 def stop_connections() -> dict:
     return store.stop_connections_geojson()
+
+
+@app.get("/agency")
+def agency() -> dict[str, str]:
+    return {"agency_name": store.agency_name()}
 
 
 @app.get("/vehicles")

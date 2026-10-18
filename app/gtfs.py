@@ -182,6 +182,7 @@ def _extract_polyline_between(polyline: list[list[float]], start_distance: float
 def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
     with zipfile.ZipFile(io.BytesIO(raw_zip)) as archive:
         routes_rows = _read_csv_from_zip(archive, "routes.txt")
+        agency_rows = _read_csv_from_zip(archive, "agency.txt")
         trips_rows = _read_csv_from_zip(archive, "trips.txt")
         shapes_rows = _read_csv_from_zip(archive, "shapes.txt")
         stops_rows = _read_csv_from_zip(archive, "stops.txt")
@@ -189,6 +190,11 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
 
     if not routes_rows or not trips_rows or not stops_rows:
         raise ValueError("GTFS ZIPに必要な routes.txt / trips.txt / stops.txt が不足しています。")
+
+    agency_name = next(
+        (row.get("agency_name", "").strip() for row in agency_rows if row.get("agency_name", "").strip()),
+        "",
+    )
 
     stop_coords: dict[str, list[float]] = {}
     stop_names: dict[str, str] = {}
@@ -447,6 +453,7 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
         )
 
     return {
+        "agency_name": agency_name,
         "routes_geojson": {"type": "FeatureCollection", "features": route_features},
         "stops_geojson": {"type": "FeatureCollection", "features": stop_features},
         "stop_connections_geojson": {"type": "FeatureCollection", "features": stop_connection_features},

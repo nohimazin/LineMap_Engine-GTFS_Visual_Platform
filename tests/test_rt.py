@@ -43,6 +43,7 @@ def test_fetch_gzipped_vehicle_positions() -> None:
     assert service.status()["last_error"] is None
     assert service.vehicles()["features"][0]["properties"] == {
         "vehicle_id": "bus-1",
+        "vehicle_label": "",
         "trip_id": "trip-1",
         "route_id": "route-1",
         "bearing": 0.0,

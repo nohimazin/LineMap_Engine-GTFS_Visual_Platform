@@ -10,6 +10,7 @@ class DataStore:
         self._lock = threading.Lock()
         self._gtfs_data: dict[str, dict[str, Any]] = {}
         self._current_gtfs_id: str = "default"
+        self._agency_name: str = ""
         self._routes_geojson: dict[str, Any] = {"type": "FeatureCollection", "features": []}
         self._stops_geojson: dict[str, Any] = {"type": "FeatureCollection", "features": []}
         self._stop_connections_geojson: dict[str, Any] = {"type": "FeatureCollection", "features": []}
@@ -80,6 +81,7 @@ class DataStore:
                 return False
             self._current_gtfs_id = gtfs_id
             data = self._gtfs_data[gtfs_id]
+            self._agency_name = data.get("agency_name", "")
             self._routes_geojson = data.get("routes_geojson", {"type": "FeatureCollection", "features": []})
             self._stops_geojson = data.get("stops_geojson", {"type": "FeatureCollection", "features": []})
             self._stop_connections_geojson = data.get("stop_connections_geojson", {"type": "FeatureCollection", "features": []})
@@ -94,10 +96,12 @@ class DataStore:
         stop_connections_geojson: dict[str, Any],
         trip_to_route: dict[str, str],
         route_catalog: list[dict[str, Any]],
+        agency_name: str = "",
         gtfs_id: str = "default",
     ) -> None:
         with self._lock:
             data = {
+                "agency_name": agency_name,
                 "routes_geojson": routes_geojson,
                 "stops_geojson": stops_geojson,
                 "stop_connections_geojson": stop_connections_geojson,
@@ -106,6 +110,7 @@ class DataStore:
             }
             self._gtfs_data[gtfs_id] = data
             self._current_gtfs_id = gtfs_id
+            self._agency_name = agency_name
             self._routes_geojson = routes_geojson
             self._stops_geojson = stops_geojson
             self._stop_connections_geojson = stop_connections_geojson
@@ -134,3 +139,7 @@ class DataStore:
     def route_catalog(self) -> list[dict[str, Any]]:
         with self._lock:
             return self._route_catalog
+
+    def agency_name(self) -> str:
+        with self._lock:
+            return self._agency_name
