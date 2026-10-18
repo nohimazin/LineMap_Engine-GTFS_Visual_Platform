@@ -45,7 +45,7 @@ def test_fetch_gzipped_vehicle_positions() -> None:
         "vehicle_id": "bus-1",
         "trip_id": "trip-1",
         "route_id": "route-1",
-        "bearing": None,
-        "speed": None,
+        "bearing": 0.0,
+        "speed": 0.0,
         "timestamp": None,
     }

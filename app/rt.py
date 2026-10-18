@@ -92,6 +92,9 @@ class RealtimeVehicleService:
                 if vehicle.HasField("vehicle") and vehicle.vehicle.HasField("id"):
                     vehicle_id = vehicle.vehicle.id
 
+                bearing = vehicle.position.bearing if vehicle.position.HasField("bearing") else 0.0
+                speed = vehicle.position.speed if vehicle.position.HasField("speed") else 0.0
+
                 features.append(
                     {
                         "type": "Feature",
@@ -100,8 +103,8 @@ class RealtimeVehicleService:
                             "vehicle_id": vehicle_id,
                             "trip_id": trip_id,
                             "route_id": route_id,
-                            "bearing": vehicle.position.bearing if vehicle.position.HasField("bearing") else None,
-                            "speed": vehicle.position.speed if vehicle.position.HasField("speed") else None,
+                            "bearing": bearing,
+                            "speed": speed,
                             "timestamp": vehicle.timestamp if vehicle.HasField("timestamp") else None,
                         },
                     }

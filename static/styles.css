@@ -101,6 +101,17 @@ body {
   display: none !important;
 }
 
+.vehicle-marker {
+  width: 16px;
+  height: 16px;
+  display: block;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background: #e4572e;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+}
+
 .load-progress {
   margin-top: 8px;
 }

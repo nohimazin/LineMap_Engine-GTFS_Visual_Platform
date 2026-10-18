@@ -10,8 +10,7 @@ function readSavedJson(key, fallback) {
 
 const savedView = readSavedJson("linemap:view", null);
 const savedState = readSavedJson("linemap:state", {});
-const savedRtConfig = readSavedJson("linemap:rt-config", null);
-const UI_BUILD_VERSION = "2026-09-23-rt-display-v2";
+const UI_BUILD_VERSION = "2026-05-02-display-settings-v1";
 const BASEMAP_STYLES = {
   liberty: "https://tiles.openfreemap.org/styles/liberty",
   bright: "https://tiles.openfreemap.org/styles/bright",
@@ -47,7 +46,6 @@ async function retryRtConnection() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ gtfs_rt_url: url || null, interval_sec: interval }),
     });
-    saveRtConfig(url, interval);
 
     // 現在の状態を即座に取得して反映
     const payload = await api("/vehicles");
@@ -70,6 +68,7 @@ const map = new maplibregl.Map({
 });
 
 map.addControl(new maplibregl.NavigationControl(), "top-right");
+window.__linemapMap = map;
 
 const state = {
   rawRoutes: { type: "FeatureCollection", features: [] },
@@ -117,6 +116,8 @@ const toggleStopsBtn = document.getElementById("toggleStopsBtn");
 const toggleVehiclesBtn = document.getElementById("toggleVehiclesBtn");
 const toggleStopConnectionsBtn = document.getElementById("toggleStopConnectionsBtn");
 let debugOverlay = null;
+const vehicleMarkers = new Map();
+const debugEnabled = new URLSearchParams(window.location.search).get("debug") === "1";
 
 if (appVersion) {
   appVersion.textContent = `Version: ${UI_BUILD_VERSION}`;
@@ -131,7 +132,7 @@ function ensureDebugOverlay() {
   if (debugOverlay) return debugOverlay;
   debugOverlay = document.createElement("pre");
   debugOverlay.id = "debugOverlay";
-  debugOverlay.className = "debug-overlay";
+  debugOverlay.className = debugEnabled ? "debug-overlay" : "debug-overlay is-hidden";
   document.body.appendChild(debugOverlay);
   return debugOverlay;
 }
@@ -148,6 +149,8 @@ function updateDebugOverlay() {
     `stopConnections(features): ${state.stopConnections.features?.length || 0}`,
     `vehicles(features): ${state.vehicles.features?.length || 0}`,
     `vehicle-arrow: ${map.hasImage("vehicle-arrow") ? "registered" : "missing"}`,
+    `map-center: ${map.getCenter().lng.toFixed(3)},${map.getCenter().lat.toFixed(3)}`,
+    `vehicle-sample: ${state.vehicles.features?.[0]?.geometry?.coordinates?.join(",") || "none"}`,
     "",
     "Layer Visibility",
     `routes-line: ${getLayerVisibility("routes-line")}`,
@@ -155,6 +158,7 @@ function updateDebugOverlay() {
     `stop-connections-line: ${getLayerVisibility("stop-connections-line")}`,
     `stop-connections-line-hit: ${getLayerVisibility("stop-connections-line-hit")}`,
     `stops-circle: ${getLayerVisibility("stops-circle")}`,
+    `vehicles-circle: ${getLayerVisibility("vehicles-circle")}`,
     `vehicles-symbol: ${getLayerVisibility("vehicles-symbol")}`,
   ];
   node.textContent = lines.join("\n");
@@ -339,6 +343,47 @@ function syncSourcesData() {
   map.getSource("stops")?.setData(state.stops);
   map.getSource("stop-connections")?.setData(state.stopConnections);
   map.getSource("vehicles")?.setData(state.vehicles);
+  syncVehicleMarkers();
+}
+
+function syncVehicleMarkers() {
+  const activeIds = new Set();
+  for (const [index, feature] of (state.vehicles.features || []).entries()) {
+    const coordinates = feature?.geometry?.coordinates;
+    if (!Array.isArray(coordinates) || coordinates.length < 2) continue;
+    const longitude = Number(coordinates[0]);
+    const latitude = Number(coordinates[1]);
+    if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) continue;
+
+    const properties = feature.properties || {};
+    const markerId = String(properties.vehicle_id || feature.id || `vehicle-${index}`);
+    activeIds.add(markerId);
+    try {
+      let marker = vehicleMarkers.get(markerId);
+      if (!marker) {
+        const element = document.createElement("span");
+        element.className = "vehicle-marker";
+        element.setAttribute("aria-label", `車両 ${markerId}`);
+        element.title = `車両: ${markerId}`;
+        marker = new maplibregl.Marker({ element, anchor: "center" });
+        marker.setLngLat({ lng: longitude, lat: latitude });
+        marker.addTo(map);
+        vehicleMarkers.set(markerId, marker);
+      } else {
+        marker.setLngLat({ lng: longitude, lat: latitude });
+      }
+      marker.getElement().hidden = !state.showVehicles;
+    } catch (error) {
+      console.warn("車両Markerの描画をスキップしました", { markerId, longitude, latitude, error });
+    }
+  }
+
+  for (const [markerId, marker] of vehicleMarkers) {
+    if (!activeIds.has(markerId)) {
+      marker.remove();
+      vehicleMarkers.delete(markerId);
+    }
+  }
 }
 
 function focusMapOnVehicles() {
@@ -350,11 +395,17 @@ function focusMapOnVehicles() {
     .filter(([longitude, latitude]) => Number.isFinite(longitude) && Number.isFinite(latitude));
   if (!coordinates.length) return;
 
-  const bounds = coordinates.reduce(
-    (result, coordinate) => result.extend(coordinate),
-    new maplibregl.LngLatBounds(coordinates[0], coordinates[0]),
-  );
-  map.fitBounds(bounds, { padding: 80, maxZoom: 14, duration: 700 });
+  const longitudes = coordinates.map(([longitude]) => longitude);
+  const latitudes = coordinates.map(([, latitude]) => latitude);
+  const bounds = [
+    [Math.min(...longitudes), Math.min(...latitudes)],
+    [Math.max(...longitudes), Math.max(...latitudes)],
+  ];
+  try {
+    map.fitBounds(bounds, { padding: 80, maxZoom: 14, duration: 700 });
+  } catch (error) {
+    console.warn("車両位置への地図移動に失敗しました", error);
+  }
   state.hasFocusedVehicles = true;
 }
 
@@ -374,6 +425,9 @@ function applyLayerVisibility() {
   }
   if (map.getLayer("vehicles-circle")) {
     map.setLayoutProperty("vehicles-circle", "visibility", state.showVehicles ? "visible" : "none");
+  }
+  for (const marker of vehicleMarkers.values()) {
+    marker.getElement().hidden = !state.showVehicles;
   }
     console.log("[applyLayerVisibility]", { showStops: state.showStops, showVehicles: state.showVehicles, showStopConnections: state.showStopConnections, mergeRoundTrip: state.mergeRoundTrip, stopConnectionsVisible });
     updateDebugOverlay();
@@ -459,10 +513,6 @@ function saveMapView() {
     "linemap:view",
     JSON.stringify({ center: [center.lng, center.lat], zoom: map.getZoom() }),
   );
-}
-
-function saveRtConfig(url, interval) {
-  localStorage.setItem("linemap:rt-config", JSON.stringify({ url, interval }));
 }
 
 async function api(path, options = {}) {
@@ -1353,7 +1403,6 @@ async function saveRtConfig() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ gtfs_rt_url: url || null, interval_sec: interval }),
     });
-    saveRtConfig(url, interval);
     renderRtStatus(result.status);
   } catch (err) {
     setRtStatus(`保存失敗: ${err.message}`, "error");
@@ -1569,21 +1618,6 @@ map.on("load", async () => {
   ensureDebugOverlay();
   refreshOverlayLayers();
   wireActions();
-  if (savedRtConfig?.url) {
-    const interval = Number(savedRtConfig.interval || 10);
-    document.getElementById("rtUrlInput").value = savedRtConfig.url;
-    document.getElementById("rtIntervalInput").value = String(interval);
-    try {
-      const payload = await api("/settings/gtfs_rt", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gtfs_rt_url: savedRtConfig.url, interval_sec: interval }),
-      });
-      renderRtStatus(payload.status);
-    } catch (err) {
-      setRtStatus(`RT設定の復元失敗: ${err.message}`, "error");
-    }
-  }
   rtStatus.textContent = "ベースマップを表示中...";
   setGtfsLoadProgress(5, "GTFSデータを読み込み中...", "初期化しています");
 
@@ -1609,8 +1643,10 @@ map.on("load", async () => {
       const hadVehicles = state.vehicles.features?.length > 0;
       state.vehicles = payload.vehicles;
       map.getSource("vehicles")?.setData(state.vehicles);
+      syncVehicleMarkers();
       if (!hadVehicles) focusMapOnVehicles();
       renderRtStatus(payload.status);
+      updateDebugOverlay();
     } catch (err) {
       setRtStatus(`RT取得失敗: ${err.message}`, "error");
     }
