@@ -356,7 +356,7 @@ function buildVehiclePopupText(properties = {}) {
   const bearingValue = Number(properties.bearing);
   const speedValue = Number(properties.speed);
   const bearing = Number.isFinite(bearingValue) ? `${bearingValue.toFixed(1)}°` : "不明";
-  const speed = Number.isFinite(speedValue) ? `${speedValue.toFixed(1)} m/s` : "不明";
+  const speed = Number.isFinite(speedValue) ? `${(speedValue * 3.6).toFixed(1)} km/h` : "不明";
   const timestampValue = Number(properties.timestamp);
   const timestamp = Number.isFinite(timestampValue) && timestampValue > 0
     ? new Date(timestampValue * 1000).toLocaleString("ja-JP", { hour12: false })
