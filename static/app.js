@@ -87,6 +87,7 @@ const state = {
   showStopConnections: savedState.showStopConnections ?? false,
   showVehicles: savedState.showVehicles ?? true,
   showStopRouteIds: savedState.showStopRouteIds ?? false,
+  showVehicleIds: savedState.showVehicleIds ?? false,
   mergeRoundTrip: savedState.mergeRoundTrip ?? false,
   mergeColorSide: savedState.mergeColorSide || "first",
   stopConnectionsLineWidth: savedState.stopConnectionsLineWidth ?? 2.5,
@@ -244,6 +245,7 @@ function saveUiState() {
       showStopConnections: state.showStopConnections,
       showVehicles: state.showVehicles,
       showStopRouteIds: state.showStopRouteIds,
+      showVehicleIds: state.showVehicleIds,
       mergeRoundTrip: state.mergeRoundTrip,
       mergeColorSide: state.mergeColorSide,
       stopConnectionsLineWidth: state.stopConnectionsLineWidth,
@@ -368,7 +370,7 @@ function buildVehiclePopupText(properties = {}) {
     `速度: ${speed}`,
     `更新時刻: ${timestamp}`,
   ];
-  if (state.showStopRouteIds) {
+  if (state.showVehicleIds) {
     lines.splice(3, 0, `route_id: ${routeId || "不明"}`, `trip_id: ${tripId}`);
   }
   return lines.join("\n");
@@ -1502,6 +1504,14 @@ function wireActions() {
   mergeRoundTripToggle.checked = state.mergeRoundTrip;
   if (showStopRouteIdsToggle) {
     showStopRouteIdsToggle.checked = state.showStopRouteIds;
+  }
+  const showVehicleIdsToggle = document.getElementById("showVehicleIdsToggle");
+  if (showVehicleIdsToggle) {
+    showVehicleIdsToggle.checked = state.showVehicleIds;
+    showVehicleIdsToggle.addEventListener("change", () => {
+      state.showVehicleIds = showVehicleIdsToggle.checked;
+      saveUiState();
+    });
   }
   mergeColorSideSelect.value = state.mergeColorSide;
   mergeColorSideSelect.disabled = !state.mergeRoundTrip;
