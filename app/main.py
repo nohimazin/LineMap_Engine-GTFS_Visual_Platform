@@ -73,7 +73,12 @@ def health() -> dict[str, str]:
 
 
 @app.post("/upload")
-async def upload_gtfs(file: UploadFile = File(...), gtfs_id: str = Query("default")) -> dict[str, int | str]:
+async def upload_gtfs(
+    file: UploadFile = File(...),
+    gtfs_id: str = Query("default"),
+    gtfs_rt_url: HttpUrl | None = Query(None),
+    interval_sec: int = Query(10, ge=5, le=60),
+) -> dict[str, int | str]:
     if not file.filename.lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="GTFS ZIPファイルを指定してください。")
 
@@ -91,6 +96,8 @@ async def upload_gtfs(file: UploadFile = File(...), gtfs_id: str = Query("defaul
         trip_to_route=parsed["trip_to_route"],
         route_catalog=parsed["route_catalog"],
         agency_name=parsed["agency_name"],
+        gtfs_rt_url=str(gtfs_rt_url) if gtfs_rt_url else None,
+        interval_sec=interval_sec,
         gtfs_id=gtfs_id,
     )
     saved_rt_config = store.gtfs_rt_config()

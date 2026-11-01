@@ -540,6 +540,31 @@ button:hover {
   font-weight: 700;
 }
 
+.stop-times-details {
+  margin-top: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
+}
+
+.stop-times-nearby-scroll {
+  max-height: 120px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.stop-times-details summary {
+  color: var(--accent-strong);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.stop-times-list {
+  margin-top: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+  line-height: 1.7;
+}
+
 .debug-overlay {
   position: fixed;
   right: 18px;

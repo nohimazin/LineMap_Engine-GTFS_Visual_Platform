@@ -77,6 +77,10 @@
               <input id="showStopRouteIdsToggle" type="checkbox" />
               <span>路線・停留所のIDを表示する</span>
             </label>
+            <label class="checkbox-row">
+              <input id="showStopTimeSecondsToggle" type="checkbox" />
+              <span>時刻表示に秒数を表示する</span>
+            </label>
           </div>
           <div class="card-subsection">
             <h3>車両ポップアップ</h3>
@@ -91,6 +95,10 @@
           </div>
           <div class="card-subsection">
             <h3>停留所連結線</h3>
+            <label class="checkbox-row">
+              <input id="showTodayStopConnectionsToggle" type="checkbox" />
+              <span>今日運行される便のみ表示する</span>
+            </label>
             <label for="stopConnectionsWidthInput">線の太さ</label>
             <div class="inline-controls width-control-row">
               <input id="stopConnectionsWidthRange" type="range" min="1" max="20" step="0.05" />
@@ -184,6 +192,17 @@
             <input type="file" id="gtfsZipInput" accept=".zip" />
             <p class="hint">アップロード後、このGTFSが使用対象になります。</p>
           </section>
+          <section class="settings-section">
+            <h3>GTFS-RT車両情報（任意）</h3>
+            <label for="gtfsUploadRtUrlInput">Vehicle Positions URL</label>
+            <input id="gtfsUploadRtUrlInput" type="url" placeholder="未設定でも保存できます" />
+            <label for="gtfsUploadRtIntervalInput">更新間隔</label>
+            <div class="inline-controls rt-interval-row">
+              <input id="gtfsUploadRtIntervalInput" type="number" min="5" max="60" value="10" />
+              <span>秒</span>
+            </div>
+            <p class="hint">URLを空欄にするとGTFS-RTを停止した状態で保存します。</p>
+          </section>
           <p id="gtfsUploadResult" class="hint" role="status"></p>
           <div id="gtfsUploadProgressWrap" class="load-progress is-hidden" aria-live="polite">
             <div class="load-progress-bar"><div id="gtfsUploadProgressBar"></div></div>
@@ -192,13 +211,13 @@
         </div>
         <div class="settings-dialog-actions">
           <button id="cancelGtfsUploadBtn" class="secondary-button" type="button">戻る</button>
-          <button id="uploadGtfsBtn" type="button">アップロード</button>
+          <button id="uploadGtfsBtn" type="button">アップロードして保存</button>
         </div>
       </form>
     </dialog>
 
     <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
     <script src="/static/performance-monitor.js?v=20260502f"></script>
-    <script src="/static/app.js?v=20261018u"></script>
+    <script src="/static/app.js?v=20261101-stop-connection-filter-v1"></script>
   </body>
 </html>

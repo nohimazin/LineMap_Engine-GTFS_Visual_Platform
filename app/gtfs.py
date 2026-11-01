@@ -2,6 +2,7 @@ import csv
 import hashlib
 import io
 import zipfile
+from datetime import date
 from collections import defaultdict
 from typing import Any
 
@@ -179,10 +180,58 @@ def _extract_polyline_between(polyline: list[list[float]], start_distance: float
     return result
 
 
+def _active_service_ids(
+    calendar_rows: list[dict[str, str]],
+    calendar_date_rows: list[dict[str, str]],
+    target_date: date,
+) -> set[str] | None:
+    if not calendar_rows and not calendar_date_rows:
+        return None
+
+    target_yyyymmdd = target_date.strftime("%Y%m%d")
+    weekday_column = (
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+    )[target_date.weekday()]
+    active: set[str] = set()
+
+    for row in calendar_rows:
+        service_id = row.get("service_id", "").strip()
+        start_date = row.get("start_date", "").strip()
+        end_date = row.get("end_date", "").strip()
+        if (
+            service_id
+            and start_date <= target_yyyymmdd <= end_date
+            and row.get(weekday_column, "").strip() == "1"
+        ):
+            active.add(service_id)
+
+    for row in calendar_date_rows:
+        if row.get("date", "").strip() != target_yyyymmdd:
+            continue
+        service_id = row.get("service_id", "").strip()
+        exception_type = row.get("exception_type", "").strip()
+        if not service_id:
+            continue
+        if exception_type == "1":
+            active.add(service_id)
+        elif exception_type == "2":
+            active.discard(service_id)
+
+    return active
+
+
 def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
     with zipfile.ZipFile(io.BytesIO(raw_zip)) as archive:
         routes_rows = _read_csv_from_zip(archive, "routes.txt")
         agency_rows = _read_csv_from_zip(archive, "agency.txt")
+        calendar_rows = _read_csv_from_zip(archive, "calendar.txt")
+        calendar_date_rows = _read_csv_from_zip(archive, "calendar_dates.txt")
         trips_rows = _read_csv_from_zip(archive, "trips.txt")
         shapes_rows = _read_csv_from_zip(archive, "shapes.txt")
         stops_rows = _read_csv_from_zip(archive, "stops.txt")
@@ -191,6 +240,10 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
     if not routes_rows or not trips_rows or not stops_rows:
         raise ValueError("GTFS ZIPに必要な routes.txt / trips.txt / stops.txt が不足しています。")
 
+    service_date = date.today()
+    active_service_ids = _active_service_ids(calendar_rows, calendar_date_rows, service_date)
+    weekday_labels = ("月", "火", "水", "木", "金", "土", "日")
+    service_label = f"{service_date:%Y年%m月%d日}（{weekday_labels[service_date.weekday()]}）"
     agency_name = next(
         (row.get("agency_name", "").strip() for row in agency_rows if row.get("agency_name", "").strip()),
         "",
@@ -260,11 +313,19 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
         }
 
     trip_to_route: dict[str, str] = {}
+    trip_to_route_all: dict[str, str] = {}
+    trip_to_shape_all: dict[str, str] = {}
     shape_to_route: dict[str, str] = {}
     for row in trips_rows:
         trip_id = row.get("trip_id", "").strip()
         route_id = row.get("route_id", "").strip()
         shape_id = row.get("shape_id", "").strip()
+        if trip_id and route_id:
+            trip_to_route_all[trip_id] = route_id
+        if trip_id and shape_id:
+            trip_to_shape_all[trip_id] = shape_id
+        if active_service_ids is not None and row.get("service_id", "").strip() not in active_service_ids:
+            continue
         if trip_id and route_id:
             trip_to_route[trip_id] = route_id
         if trip_id and shape_id:
@@ -312,11 +373,14 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
             route_lines[route_id].append(line)
 
     stop_connection_features: list[dict[str, Any]] = []
-    generated_connection_keys: set[tuple[str, str, tuple[str, ...]]] = set()
-    trip_stop_items = sorted(trip_stop_times.items(), key=lambda item: item[0])
+    generated_connection_indexes: dict[tuple[str, str, tuple[str, ...]], int] = {}
+    trip_stop_items = sorted(
+        trip_stop_times.items(),
+        key=lambda item: (item[0] not in trip_to_route, item[0]),
+    )
     for trip_id, stop_items in trip_stop_items:
-        route_id = trip_to_route.get(trip_id, "")
-        shape_id = trip_to_shape.get(trip_id, "")
+        route_id = trip_to_route_all.get(trip_id, "")
+        shape_id = trip_to_shape_all.get(trip_id, "")
         if not route_id:
             continue
 
@@ -333,9 +397,15 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
             continue
 
         stop_id_sequence = tuple(stop_id for _, stop_id, _ in ordered_stops)
-        dedup_shape_key = shape_id if shape_id else f"trip:{trip_id}"
+        dedup_shape_key = shape_id if shape_id else "stops"
         connection_key = (route_id, dedup_shape_key, stop_id_sequence)
-        if connection_key in generated_connection_keys:
+        existing_index = generated_connection_indexes.get(connection_key)
+        service_active_today = active_service_ids is None or trip_id in trip_to_route
+        if existing_index is not None:
+            existing_properties = stop_connection_features[existing_index]["properties"]
+            existing_properties["service_active_today"] = (
+                existing_properties["service_active_today"] or service_active_today
+            )
             continue
 
         connection_coordinates: list[list[float]] = []
@@ -376,10 +446,11 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
                     "trip_id": trip_id,
                     "shape_id": shape_id,
                     "stop_count": len(ordered_stops),
+                    "service_active_today": service_active_today,
                 },
             }
         )
-        generated_connection_keys.add(connection_key)
+        generated_connection_indexes[connection_key] = len(stop_connection_features) - 1
 
     route_features: list[dict[str, Any]] = []
     route_catalog: list[dict[str, Any]] = []
@@ -447,13 +518,17 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
                     "stop_code": stop_codes.get(stop_id, ""),
                     "parent_station": stop_parent_station.get(stop_id, ""),
                     "routes": sorted(list(stop_to_routes.get(stop_id, set()))),
-                    "times": sorted(list(stop_to_times.get(stop_id, set())))[:5],  # 最初の5つまで
+                    "times": sorted(list(stop_to_times.get(stop_id, set()))),
+                    "service_date": service_date.isoformat(),
+                    "service_label": service_label,
                 },
             }
         )
 
     return {
         "agency_name": agency_name,
+        "service_date": service_date.isoformat(),
+        "service_label": service_label,
         "routes_geojson": {"type": "FeatureCollection", "features": route_features},
         "stops_geojson": {"type": "FeatureCollection", "features": stop_features},
         "stop_connections_geojson": {"type": "FeatureCollection", "features": stop_connection_features},

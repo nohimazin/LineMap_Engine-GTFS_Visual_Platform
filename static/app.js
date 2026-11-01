@@ -10,7 +10,7 @@ function readSavedJson(key, fallback) {
 
 const savedView = readSavedJson("linemap:view", null);
 const savedState = readSavedJson("linemap:state", {});
-const UI_BUILD_VERSION = "2026-05-02-display-settings-v1";
+const UI_BUILD_VERSION = "2026-11-01-stop-connection-filter-v1";
 const BASEMAP_STYLES = {
   liberty: "https://tiles.openfreemap.org/styles/liberty",
   bright: "https://tiles.openfreemap.org/styles/bright",
@@ -86,8 +86,10 @@ const state = {
   visibleRouteIds: new Set(savedState.visibleRouteIds || []),
   showStops: savedState.showStops ?? true,
   showStopConnections: savedState.showStopConnections ?? false,
+  showTodayStopConnections: savedState.showTodayStopConnections ?? false,
   showVehicles: savedState.showVehicles ?? true,
   showStopRouteIds: savedState.showStopRouteIds ?? false,
+  showStopTimeSeconds: savedState.showStopTimeSeconds ?? false,
   showVehicleIds: savedState.showVehicleIds ?? false,
   showVehicleBearing: savedState.showVehicleBearing ?? false,
   mergeRoundTrip: savedState.mergeRoundTrip ?? false,
@@ -115,6 +117,8 @@ const mergeColorSideSelect = document.getElementById("mergeColorSideSelect");
 const stopConnectionsWidthRange = document.getElementById("stopConnectionsWidthRange");
 const stopConnectionsWidthInput = document.getElementById("stopConnectionsWidthInput");
 const showStopRouteIdsToggle = document.getElementById("showStopRouteIdsToggle");
+const showStopTimeSecondsToggle = document.getElementById("showStopTimeSecondsToggle");
+const showTodayStopConnectionsToggle = document.getElementById("showTodayStopConnectionsToggle");
 const toggleStopsBtn = document.getElementById("toggleStopsBtn");
 const toggleVehiclesBtn = document.getElementById("toggleVehiclesBtn");
 const toggleStopConnectionsBtn = document.getElementById("toggleStopConnectionsBtn");
@@ -260,8 +264,10 @@ function saveUiState() {
       visibleRouteIds: Array.from(state.visibleRouteIds),
       showStops: state.showStops,
       showStopConnections: state.showStopConnections,
+      showTodayStopConnections: state.showTodayStopConnections,
       showVehicles: state.showVehicles,
       showStopRouteIds: state.showStopRouteIds,
+      showStopTimeSeconds: state.showStopTimeSeconds,
       showVehicleIds: state.showVehicleIds,
       showVehicleBearing: state.showVehicleBearing,
       mergeRoundTrip: state.mergeRoundTrip,
@@ -782,10 +788,16 @@ function normalizeRouteId(value) {
 }
 
 function normalizeRouteDatasets() {
+  const stopConnections = {
+    type: "FeatureCollection",
+    features: (state.rawStopConnections.features || []).filter(
+      (feature) => !state.showTodayStopConnections || feature?.properties?.service_active_today === true,
+    ),
+  };
   if (!state.mergeRoundTrip) {
     state.routes = deepClone(state.rawRoutes);
     state.routeCatalog = deepClone(state.rawRouteCatalog);
-    state.stopConnections = deepClone(state.rawStopConnections);
+    state.stopConnections = deepClone(stopConnections);
     state.routeToGroup = {};
     state.groupToRoutes = {};
     state.routeCatalog.forEach((route) => {
@@ -903,17 +915,22 @@ function normalizeRouteDatasets() {
   }
 
   const connectionFeaturesByRouteId = {};
-  for (const feature of state.rawStopConnections.features || []) {
+  for (const feature of stopConnections.features || []) {
     const rid = normalizeRouteId(feature?.properties?.route_id);
     if (rid) {
-      connectionFeaturesByRouteId[rid] = feature;
+      if (!connectionFeaturesByRouteId[rid]) {
+        connectionFeaturesByRouteId[rid] = [];
+      }
+      connectionFeaturesByRouteId[rid].push(feature);
     }
   }
 
   const mergedConnectionFeatures = [];
   for (const mergedItem of mergedCatalog) {
     const memberRouteIds = mergedItem.member_route_ids || [];
-    const memberFeatures = memberRouteIds.map((rid) => connectionFeaturesByRouteId[normalizeRouteId(rid)]).filter(Boolean);
+    const memberFeatures = memberRouteIds
+      .flatMap((rid) => connectionFeaturesByRouteId[normalizeRouteId(rid)] || [])
+      .filter(Boolean);
     if (memberFeatures.length === 0) {
       continue;
     }
@@ -938,6 +955,9 @@ function normalizeRouteDatasets() {
         route_color:
           routeFeaturesByRouteId[mergedItem.color_source_route_id]?.properties?.route_color || mergedItem.route_color,
         member_route_ids: memberRouteIds,
+        service_active_today: memberFeatures.some(
+          (feature) => feature?.properties?.service_active_today === true,
+        ),
       },
     });
   }
@@ -1183,6 +1203,80 @@ function normalizeDisplayText(value) {
   return text;
 }
 
+function timeToMinutes(timeText) {
+  const match = String(timeText || "").trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes) || minutes > 59) return null;
+  return (hours * 60 + minutes) % (24 * 60);
+}
+
+function formatStopTime(timeText) {
+  const text = String(timeText || "").trim();
+  const match = text.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!match) return text;
+  if (state.showStopTimeSeconds && match[3] !== undefined) {
+    return `${match[1].padStart(2, "0")}:${match[2]}:${match[3]}`;
+  }
+  return `${match[1].padStart(2, "0")}:${match[2]}`;
+}
+
+function getCurrentTimeMinutes() {
+  const now = new Date();
+  return now.getHours() * 60 + now.getMinutes();
+}
+
+function circularTimeDistance(firstMinutes, secondMinutes) {
+  const difference = Math.abs(firstMinutes - secondMinutes);
+  return Math.min(difference, 24 * 60 - difference);
+}
+
+function buildStopTimesHtml(times, serviceLabel) {
+  const nearbyTimesScrollThreshold = 12;
+  const normalizedTimes = times
+    .map((time, index) => ({ text: formatStopTime(time), minutes: timeToMinutes(time), index }))
+    .filter((time) => time.text);
+  if (normalizedTimes.length === 0) return "";
+
+  const currentMinutes = getCurrentTimeMinutes();
+  const nearby = normalizedTimes.filter(
+    (time) => time.minutes !== null && circularTimeDistance(time.minutes, currentMinutes) <= 60,
+  );
+  const hasNearbyTimes = nearby.length > 0;
+  const nearbyTimes = nearby.length > 0
+    ? nearby
+    : [...normalizedTimes]
+        .filter((time) => time.minutes !== null)
+        .sort(
+          (first, second) =>
+            circularTimeDistance(first.minutes, currentMinutes) -
+            circularTimeDistance(second.minutes, currentMinutes),
+        )
+        .slice(0, 3);
+  const nearbyIndexes = new Set(nearbyTimes.map((time) => time.index));
+  const otherTimes = normalizedTimes.filter((time) => !nearbyIndexes.has(time.index));
+
+  const nearbyTimesText = nearbyTimes.map((time) => escapeHtml(time.text)).join(", ");
+  const nearbyTimesHtml =
+    nearbyTimes.length > nearbyTimesScrollThreshold
+      ? `<div class="stop-times-nearby-scroll">${nearbyTimesText}</div>`
+      : nearbyTimesText;
+  const timeLabel = hasNearbyTimes
+    ? "現在時刻の前後60分以内の便"
+    : "現在時刻に近い3件";
+  const serviceDayLabel = serviceLabel ? `今日（${escapeHtml(serviceLabel)}）の${timeLabel}` : `今日の${timeLabel}`;
+  const lines = [`${serviceDayLabel}: ${nearbyTimesHtml}`];
+  if (otherTimes.length > 0) {
+    lines.push(
+      `<details class="stop-times-details"><summary>その他の時刻（前後60分以内に該当しない${otherTimes.length}件）</summary><div class="stop-times-list">${otherTimes
+        .map((time) => escapeHtml(time.text))
+        .join(", ")}</div></details>`,
+    );
+  }
+  return lines.join("<br/>");
+}
+
 function buildStopPopupHtml(properties) {
   const stopName = normalizeDisplayText(properties?.stop_name);
   const stopCode = normalizeDisplayText(properties?.stop_code);
@@ -1191,6 +1285,7 @@ function buildStopPopupHtml(properties) {
   const title = stopName || stopCode || `バス停 ${stopId || "不明"}`;
   const routes = Array.isArray(properties?.routes) ? properties.routes.filter(Boolean) : [];
   const times = Array.isArray(properties?.times) ? properties.times.filter(Boolean) : [];
+  const serviceLabel = normalizeDisplayText(properties?.service_label);
   const routeNames = routes.map((routeId) => {
     const routeName = getRouteDisplayName(routeId);
     return state.showStopRouteIds && routeName !== routeId
@@ -1214,7 +1309,9 @@ function buildStopPopupHtml(properties) {
     lines.push(`通過路線: ${routeNames.slice(0, 5).map(escapeHtml).join(", ")}`);
   }
   if (times.length > 0) {
-    lines.push(`時刻(簡易): ${times.slice(0, 5).map(escapeHtml).join(", ")}`);
+    lines.push(buildStopTimesHtml(times, serviceLabel));
+  } else {
+    lines.push(serviceLabel ? `今日（${escapeHtml(serviceLabel)}）の時刻: なし` : "今日の時刻: なし");
   }
   return lines.join("<br/>");
 }
@@ -1238,8 +1335,11 @@ function buildStopPopupText(properties) {
   if (routes.length > 0) {
     lines.push(`通過路線: ${routes.slice(0, 5).join(", ")}`);
   }
+  const serviceLabel = normalizeDisplayText(properties?.service_label);
   if (times.length > 0) {
-    lines.push(`時刻(簡易): ${times.slice(0, 5).join(", ")}`);
+    lines.push(`今日（${serviceLabel || "本日"}）の時刻: ${times.map(formatStopTime).join(", ")}`);
+  } else {
+    lines.push(`今日（${serviceLabel || "本日"}）の時刻: なし`);
   }
   return lines.join("\n");
 }
@@ -1431,10 +1531,17 @@ async function reloadAllData() {
   setGtfsLoadProgress(100, "GTFSデータの読み込みが完了しました。");
 }
 
-function uploadGtfsWithProgress(formData, gtfsId = "default") {
+function uploadGtfsWithProgress(formData, gtfsId = "default", gtfsRtUrl = "", intervalSec = 10) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", `/upload?gtfs_id=${encodeURIComponent(gtfsId)}`);
+    const params = new URLSearchParams({
+      gtfs_id: gtfsId,
+      interval_sec: String(intervalSec),
+    });
+    if (gtfsRtUrl) {
+      params.set("gtfs_rt_url", gtfsRtUrl);
+    }
+    xhr.open("POST", `/upload?${params.toString()}`);
     xhr.responseType = "json";
 
     xhr.upload.onprogress = (event) => {
@@ -1473,6 +1580,8 @@ function uploadGtfsWithProgress(formData, gtfsId = "default") {
 async function uploadGtfs() {
   const input = document.getElementById("gtfsZipInput");
   const gtfsIdInput = document.getElementById("gtfsIdInput");
+  const gtfsRtUrlInput = document.getElementById("gtfsUploadRtUrlInput");
+  const gtfsRtIntervalInput = document.getElementById("gtfsUploadRtIntervalInput");
   const file = input.files?.[0];
   if (!file) {
     if (gtfsUploadResult) gtfsUploadResult.textContent = "ZIPファイルを選択してください。";
@@ -1482,6 +1591,8 @@ async function uploadGtfs() {
   const formData = new FormData();
   formData.append("file", file);
   const gtfsId = gtfsIdInput.value.trim() || "default";
+  const gtfsRtUrl = gtfsRtUrlInput.value.trim();
+  const intervalSec = Number(gtfsRtIntervalInput.value || "10");
 
   try {
     setGtfsLoadProgress(5, "GTFSアップロードを開始しています...");
@@ -1490,7 +1601,7 @@ async function uploadGtfs() {
       gtfsUploadProgressBar.style.width = "5%";
       gtfsUploadProgressText.textContent = "GTFSアップロードを開始しています...";
     }
-    const result = await uploadGtfsWithProgress(formData, gtfsId);
+    const result = await uploadGtfsWithProgress(formData, gtfsId, gtfsRtUrl, intervalSec);
     setGtfsLoadProgress(70, "GTFSをサーバーで読み込み中...");
     if (gtfsUploadResult) {
       gtfsUploadResult.textContent = `${result.message} routes=${result.routes}, stops=${result.stops}`;
@@ -1543,6 +1654,8 @@ async function openDatasetSettings() {
 function openGtfsUpload() {
   document.getElementById("gtfsIdInput").value = "default";
   document.getElementById("gtfsZipInput").value = "";
+  document.getElementById("gtfsUploadRtUrlInput").value = "";
+  document.getElementById("gtfsUploadRtIntervalInput").value = "10";
   if (gtfsUploadResult) gtfsUploadResult.textContent = "";
   gtfsUploadDialog?.showModal();
 }
@@ -1607,6 +1720,22 @@ function wireActions() {
   mergeRoundTripToggle.checked = state.mergeRoundTrip;
   if (showStopRouteIdsToggle) {
     showStopRouteIdsToggle.checked = state.showStopRouteIds;
+  }
+  if (showStopTimeSecondsToggle) {
+    showStopTimeSecondsToggle.checked = state.showStopTimeSeconds;
+    showStopTimeSecondsToggle.addEventListener("change", () => {
+      state.showStopTimeSeconds = showStopTimeSecondsToggle.checked;
+      saveUiState();
+    });
+  }
+  if (showTodayStopConnectionsToggle) {
+    showTodayStopConnectionsToggle.checked = state.showTodayStopConnections;
+    showTodayStopConnectionsToggle.addEventListener("change", () => {
+      state.showTodayStopConnections = showTodayStopConnectionsToggle.checked;
+      normalizeRouteDatasets();
+      refreshOverlayLayers();
+      saveUiState();
+    });
   }
   const showVehicleIdsToggle = document.getElementById("showVehicleIdsToggle");
   if (showVehicleIdsToggle) {
