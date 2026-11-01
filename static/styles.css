@@ -270,6 +270,10 @@ select {
   cursor: pointer;
 }
 
+.vehicle-marker[hidden] {
+  display: none;
+}
+
 button {
   background: linear-gradient(120deg, var(--accent), var(--accent-strong));
   color: #fff;
