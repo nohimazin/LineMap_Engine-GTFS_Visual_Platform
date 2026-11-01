@@ -10,8 +10,22 @@ import re
 import sys
 from pathlib import Path
 
+import pytest
+
 # プロジェクトルートに移動
 project_root = Path(__file__).parent.parent
+
+
+def load_test_cases() -> list[dict]:
+    with (project_root / "data" / "route_merge_testcases.json").open(encoding="utf-8") as file:
+        return json.load(file).get("cases", [])
+
+
+@pytest.mark.parametrize("case", load_test_cases(), ids=lambda case: case.get("id", "case"))
+def test_route_merge_case(case: dict) -> None:
+    routes = case.get("routes", [])
+    assert len(routes) >= 2
+    assert should_merge_route_pair(routes[0], routes[1]) == case.get("expect_merge", False)
 
 
 def normalize_whitespace(text: str) -> str:

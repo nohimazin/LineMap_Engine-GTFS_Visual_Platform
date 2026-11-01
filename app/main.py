@@ -1,4 +1,5 @@
 import asyncio
+import zipfile
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
@@ -8,18 +9,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, HttpUrl
 
-try:
-    from app.gtfs import parse_gtfs_zip
-    from app.rt import RealtimeVehicleService
-    from app.storage import DataStore
-except ModuleNotFoundError:
-    # Supports direct execution like: python app/main.py
-    from gtfs import parse_gtfs_zip
-    from rt import RealtimeVehicleService
-    from storage import DataStore
+from app.gtfs import parse_gtfs_zip
+from app.rt import RealtimeVehicleService
+from app.storage import DataStore
 
 
-class RtConfigRequest(BaseModel):
+class DatasetSettingsRequest(BaseModel):
+    gtfs_id: str = "default"
     gtfs_rt_url: HttpUrl | None = None
     interval_sec: int = 10
 
@@ -32,6 +28,8 @@ static_dir = Path(__file__).resolve().parent.parent / "static"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    saved_rt_config = store.gtfs_rt_config()
+    rt_service.configure(saved_rt_config.get("gtfs_rt_url"), saved_rt_config.get("interval_sec", 10))
     polling_task = asyncio.create_task(rt_service.polling_loop(store.trip_to_route))
     try:
         yield
@@ -75,7 +73,6 @@ def health() -> dict[str, str]:
 
 
 @app.post("/upload")
-@app.post("/upload_gtfs")
 async def upload_gtfs(file: UploadFile = File(...), gtfs_id: str = Query("default")) -> dict[str, int | str]:
     if not file.filename.lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="GTFS ZIPファイルを指定してください。")
@@ -83,8 +80,9 @@ async def upload_gtfs(file: UploadFile = File(...), gtfs_id: str = Query("defaul
     raw_zip = await file.read()
     try:
         parsed = parse_gtfs_zip(raw_zip)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ValueError, zipfile.BadZipFile) as exc:
+        detail = str(exc) or "有効なGTFS ZIPファイルを指定してください。"
+        raise HTTPException(status_code=400, detail=detail) from exc
 
     store.update_gtfs(
         routes_geojson=parsed["routes_geojson"],
@@ -92,8 +90,11 @@ async def upload_gtfs(file: UploadFile = File(...), gtfs_id: str = Query("defaul
         stop_connections_geojson=parsed["stop_connections_geojson"],
         trip_to_route=parsed["trip_to_route"],
         route_catalog=parsed["route_catalog"],
+        agency_name=parsed["agency_name"],
         gtfs_id=gtfs_id,
     )
+    saved_rt_config = store.gtfs_rt_config()
+    rt_service.configure(saved_rt_config.get("gtfs_rt_url"), saved_rt_config.get("interval_sec", 10))
 
     return {
         "message": "GTFSを登録しました。",
@@ -124,6 +125,11 @@ def stop_connections() -> dict:
     return store.stop_connections_geojson()
 
 
+@app.get("/agency")
+def agency() -> dict[str, str]:
+    return {"agency_name": store.agency_name()}
+
+
 @app.get("/vehicles")
 def vehicles() -> dict:
     return {
@@ -138,20 +144,47 @@ def gtfs_list() -> dict:
 
 
 @app.post("/gtfs/select")
-def select_gtfs(gtfs_id: str) -> dict:
+async def select_gtfs(gtfs_id: str) -> dict:
     if store.select_gtfs(gtfs_id):
+        selected_rt_config = store.gtfs_rt_config()
+        rt_service.configure(selected_rt_config.get("gtfs_rt_url"), selected_rt_config.get("interval_sec", 10))
+        if selected_rt_config.get("gtfs_rt_url"):
+            await rt_service.fetch_once(store.trip_to_route())
         return {
             "message": f"GTFS {gtfs_id} を選択しました",
             "current": gtfs_id,
+            "list": store.list_gtfs(),
+            "rt_config": selected_rt_config,
+            "status": rt_service.status(),
+        }
+    raise HTTPException(status_code=404, detail=f"GTFS {gtfs_id} が見つかりません")
+
+
+@app.delete("/gtfs/delete")
+def delete_gtfs(gtfs_id: str) -> dict:
+    if store.delete_gtfs(gtfs_id):
+        return {
+            "message": f"GTFS {gtfs_id} を削除しました",
             "list": store.list_gtfs(),
         }
     raise HTTPException(status_code=404, detail=f"GTFS {gtfs_id} が見つかりません")
 
 
-@app.post("/settings/gtfs_rt")
-def update_gtfs_rt_settings(payload: RtConfigRequest) -> dict:
+@app.post("/settings/dataset")
+async def update_dataset_settings(payload: DatasetSettingsRequest) -> dict:
+    if not store.select_gtfs(payload.gtfs_id):
+        raise HTTPException(status_code=404, detail=f"GTFS {payload.gtfs_id} が見つかりません")
+
     rt_service.configure(str(payload.gtfs_rt_url) if payload.gtfs_rt_url else None, payload.interval_sec)
-    return {"message": "GTFS-RT設定を更新しました。", "status": rt_service.status()}
+    status = rt_service.status()
+    store.update_gtfs_rt_config(status["url"], status["interval_sec"])
+    if payload.gtfs_rt_url:
+        await rt_service.fetch_once(store.trip_to_route())
+    return {
+        "message": "GTFSとGTFS-RT設定を保存しました。",
+        "gtfs_id": payload.gtfs_id,
+        "status": rt_service.status(),
+    }
 
 
 if __name__ == "__main__":

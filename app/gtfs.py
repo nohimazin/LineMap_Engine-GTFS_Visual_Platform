@@ -182,6 +182,7 @@ def _extract_polyline_between(polyline: list[list[float]], start_distance: float
 def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
     with zipfile.ZipFile(io.BytesIO(raw_zip)) as archive:
         routes_rows = _read_csv_from_zip(archive, "routes.txt")
+        agency_rows = _read_csv_from_zip(archive, "agency.txt")
         trips_rows = _read_csv_from_zip(archive, "trips.txt")
         shapes_rows = _read_csv_from_zip(archive, "shapes.txt")
         stops_rows = _read_csv_from_zip(archive, "stops.txt")
@@ -189,6 +190,11 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
 
     if not routes_rows or not trips_rows or not stops_rows:
         raise ValueError("GTFS ZIPに必要な routes.txt / trips.txt / stops.txt が不足しています。")
+
+    agency_name = next(
+        (row.get("agency_name", "").strip() for row in agency_rows if row.get("agency_name", "").strip()),
+        "",
+    )
 
     stop_coords: dict[str, list[float]] = {}
     stop_names: dict[str, str] = {}
@@ -377,12 +383,6 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
 
     route_features: list[dict[str, Any]] = []
     route_catalog: list[dict[str, Any]] = []
-    stop_connections_by_route: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for feature in stop_connection_features:
-        route_id = str(feature.get("properties", {}).get("route_id", "")).strip()
-        if route_id:
-            stop_connections_by_route[route_id].append(feature)
-
     for route_id, route in routes.items():
         lines = route_lines.get(route_id, [])
         geometry = None
@@ -390,23 +390,6 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
 
         if lines:
             geometry = {"type": "MultiLineString", "coordinates": lines}
-        else:
-            fallback_features = stop_connections_by_route.get(route_id, [])
-            fallback_geometries = [feature.get("geometry") for feature in fallback_features if feature.get("geometry")]
-            fallback_lines: list[list[list[float]]] = []
-            for fallback_geometry in fallback_geometries:
-                if fallback_geometry.get("type") == "LineString":
-                    coordinates = fallback_geometry.get("coordinates") or []
-                    if len(coordinates) >= 2:
-                        fallback_lines.append(coordinates)
-                elif fallback_geometry.get("type") == "MultiLineString":
-                    for coordinates in fallback_geometry.get("coordinates") or []:
-                        if len(coordinates) >= 2:
-                            fallback_lines.append(coordinates)
-
-            if fallback_lines:
-                geometry = {"type": "MultiLineString", "coordinates": fallback_lines}
-                line_count = len(fallback_lines)
 
         props = {
             "route_id": route_id,
@@ -470,6 +453,7 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
         )
 
     return {
+        "agency_name": agency_name,
         "routes_geojson": {"type": "FeatureCollection", "features": route_features},
         "stops_geojson": {"type": "FeatureCollection", "features": stop_features},
         "stop_connections_geojson": {"type": "FeatureCollection", "features": stop_connection_features},
