@@ -132,44 +132,58 @@ class DataStore:
     def gtfs_data(self, gtfs_id: str) -> dict[str, Any] | None:
         with self._lock:
             data = self._gtfs_data.get(gtfs_id)
-            return json.loads(json.dumps(data)) if data else None
+            if not data:
+                return None
+            return {
+                "agency_name": data.get("agency_name", ""),
+                "routes_geojson": data.get("routes_geojson", {}),
+                "stops_geojson": data.get("stops_geojson", {}),
+                "stop_connections_geojson": data.get("stop_connections_geojson", {}),
+                "trip_to_route": dict(data.get("trip_to_route", {})),
+                "route_catalog": [dict(item) for item in data.get("route_catalog", [])],
+                "gtfs_rt_config": dict(data.get("gtfs_rt_config", {})),
+            }
 
     def active_map_data(self) -> dict[str, Any]:
-        routes, stops, connections, catalog = [], [], [], []
-        for gid in self._active_gtfs_ids:
-            data = self._gtfs_data.get(gid, {})
-            prefix = f"{gid}:"
-            for collection, target in (
-                (data.get("routes_geojson", {}), routes),
-                (data.get("stops_geojson", {}), stops),
-                (data.get("stop_connections_geojson", {}), connections),
-            ):
-                for feature in collection.get("features", []):
-                    feature = json.loads(json.dumps(feature))
-                    props = feature.setdefault("properties", {})
-                    if props.get("stop_id"):
-                        props["stop_id"] = prefix + str(props["stop_id"])
-                    for key in ("route_id",):
-                        if props.get(key):
-                            props[key] = prefix + str(props[key])
-                    if props.get("routes"):
-                        props["routes"] = [prefix + str(value) for value in props["routes"]]
-                    if props.get("routes_all"):
-                        props["routes_all"] = [prefix + str(value) for value in props["routes_all"]]
-                    props["dataset_id"] = gid
-                    target.append(feature)
-            for item in data.get("route_catalog", []):
-                item = dict(item)
-                item["route_id"] = prefix + str(item["route_id"])
-                item["dataset_id"] = gid
-                catalog.append(item)
-        return {
-            "routes": {"type": "FeatureCollection", "features": routes},
-            "stops": {"type": "FeatureCollection", "features": stops},
-            "stop_connections": {"type": "FeatureCollection", "features": connections},
-            "route_catalog": catalog,
-            "active_gtfs_ids": list(self._active_gtfs_ids),
-        }
+        with self._lock:
+            routes, stops, connections, catalog = [], [], [], []
+            for gid in self._active_gtfs_ids:
+                data = self._gtfs_data.get(gid, {})
+                prefix = f"{gid}:"
+                for collection, target in (
+                    (data.get("routes_geojson", {}), routes),
+                    (data.get("stops_geojson", {}), stops),
+                    (data.get("stop_connections_geojson", {}), connections),
+                ):
+                    for feature in collection.get("features", []):
+                        props = dict(feature.get("properties", {}))
+                        if props.get("stop_id"):
+                            props["stop_id"] = prefix + str(props["stop_id"])
+                        for key in ("route_id",):
+                            if props.get(key):
+                                props[key] = prefix + str(props[key])
+                        if props.get("routes"):
+                            props["routes"] = [prefix + str(value) for value in props["routes"]]
+                        if props.get("routes_all"):
+                            props["routes_all"] = [prefix + str(value) for value in props["routes_all"]]
+                        props["dataset_id"] = gid
+                        target.append({
+                            "type": feature.get("type", "Feature"),
+                            "geometry": feature.get("geometry"),
+                            "properties": props,
+                        })
+                for item in data.get("route_catalog", []):
+                    item = dict(item)
+                    item["route_id"] = prefix + str(item["route_id"])
+                    item["dataset_id"] = gid
+                    catalog.append(item)
+            return {
+                "routes": {"type": "FeatureCollection", "features": routes},
+                "stops": {"type": "FeatureCollection", "features": stops},
+                "stop_connections": {"type": "FeatureCollection", "features": connections},
+                "route_catalog": catalog,
+                "active_gtfs_ids": list(self._active_gtfs_ids),
+            }
 
     def update_gtfs_rt_config(self, gtfs_id: str, gtfs_rt_url: str | None, interval_sec: int, vehicle_color: str) -> None:
         with self._lock:

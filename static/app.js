@@ -43,10 +43,12 @@ const map = new maplibregl.Map({
   zoom: savedView?.zoom || 11,
   fadeDuration: 0,
   renderWorldCopies: false,
+  preserveDrawingBuffer: true,
 });
 
 map.addControl(new maplibregl.NavigationControl(), "top-right");
 window.__linemapMap = map;
+window.map = map;
 
 const state = {
   rawRoutes: { type: "FeatureCollection", features: [] },
@@ -487,12 +489,16 @@ function focusMapOnVehicles() {
     .filter(([longitude, latitude]) => Number.isFinite(longitude) && Number.isFinite(latitude));
   if (!coordinates.length) return;
 
-  const longitudes = coordinates.map(([longitude]) => longitude);
-  const latitudes = coordinates.map(([, latitude]) => latitude);
-  const bounds = [
-    [Math.min(...longitudes), Math.min(...latitudes)],
-    [Math.max(...longitudes), Math.max(...latitudes)],
-  ];
+  let minLon = coordinates[0][0], maxLon = coordinates[0][0];
+  let minLat = coordinates[0][1], maxLat = coordinates[0][1];
+  for (let i = 1; i < coordinates.length; i++) {
+    const [lon, lat] = coordinates[i];
+    if (lon < minLon) minLon = lon;
+    if (lon > maxLon) maxLon = lon;
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+  }
+  const bounds = [[minLon, minLat], [maxLon, maxLat]];
   try {
     map.fitBounds(bounds, { padding: 80, maxZoom: 14, duration: 700 });
   } catch (error) {
@@ -615,11 +621,11 @@ function switchBaseMapStyle(styleUrl) {
 
   state.baseMapStyle = styleUrl;
   saveUiState();
-  rtStatus.textContent = "地図スタイルを切り替え中...";
+  if (rtStatus) rtStatus.textContent = "地図スタイルを切り替え中...";
   map.setStyle(styleUrl);
   map.once("style.load", () => {
     refreshOverlayLayers();
-    rtStatus.textContent = "地図スタイルを切り替えました。";
+    if (rtStatus) rtStatus.textContent = "地図スタイルを切り替えました。";
   });
 }
 
@@ -1083,6 +1089,7 @@ function normalizeRouteDatasets() {
           routeFeaturesByRouteId[mergedItem.color_source_route_id]?.properties?.route_color || mergedItem.route_color,
         member_route_ids: memberRouteIds,
         max_stop_spacing_km: Math.max(
+          0,
           ...memberRouteIds.flatMap((rid) =>
             (connectionFeaturesByRouteId[normalizeRouteId(rid)] || []).map(
               (feature) => Number(feature?.properties?.max_stop_spacing_km || 0),
@@ -1640,14 +1647,16 @@ async function refreshGtfsList() {
 
     if (gtfsItems.length > 0) {
       const current = gtfsItems.find((item) => item.is_active);
-      if (current) {
+      if (current && gtfsSelectResult) {
         gtfsSelectResult.textContent = `現在: ${current.gtfs_id} (路線: ${current.route_count}, 停留所: ${current.stop_count})`;
       }
 
     }
   } catch (err) {
     console.warn("GTFS一覧の取得に失敗しました", err);
-    gtfsSelectResult.textContent = `読み込みエラー: ${err.message}`;
+    if (gtfsSelectResult) {
+      gtfsSelectResult.textContent = `読み込みエラー: ${err.message}`;
+    }
   }
 }
 
@@ -2084,25 +2093,25 @@ function wireActions() {
   });
   syncMapFullscreenControl();
 
-  document.getElementById("toggleStopsBtn").addEventListener("click", () => {
+  document.getElementById("toggleStopsBtn")?.addEventListener("click", () => {
     state.showStops = !state.showStops;
     applyDisplaySettings();
     saveUiState();
   });
 
-  document.getElementById("toggleVehiclesBtn").addEventListener("click", () => {
+  document.getElementById("toggleVehiclesBtn")?.addEventListener("click", () => {
     state.showVehicles = !state.showVehicles;
     applyDisplaySettings();
     saveUiState();
   });
 
-  document.getElementById("toggleStopConnectionsBtn").addEventListener("click", () => {
+  document.getElementById("toggleStopConnectionsBtn")?.addEventListener("click", () => {
     state.showStopConnections = !state.showStopConnections;
     applyDisplaySettings();
     saveUiState();
   });
 
-  document.getElementById("exportPngBtn").addEventListener("click", () => {
+  document.getElementById("exportPngBtn")?.addEventListener("click", () => {
     const exportWithQuality = async () => {
       // デバッグオーバーレイを一時的に隠す
       const debugOverlay = document.querySelector('.debug-overlay');
@@ -2144,7 +2153,7 @@ function wireActions() {
       }
     };
 
-    exportWithQuality();
+    exportWithQuality().catch((err) => console.error("PNG export error:", err));
   });
 
   map.on("click", "routes-line-hit", (e) => {
@@ -2197,7 +2206,7 @@ map.on("load", async () => {
   ensureDebugOverlay();
   refreshOverlayLayers();
   wireActions();
-  rtStatus.textContent = "ベースマップを表示中...";
+  if (rtStatus) rtStatus.textContent = "ベースマップを表示中...";
   setGtfsLoadProgress(5, "GTFSデータを読み込み中...", "初期化しています");
 
   try {
@@ -2216,7 +2225,10 @@ map.on("load", async () => {
     }
   });
 
+  let isPollingVehicles = false;
   setInterval(async () => {
+    if (isPollingVehicles) return;
+    isPollingVehicles = true;
     try {
       const payload = await api("/vehicles");
       const hadVehicles = state.vehicles.features?.length > 0;
@@ -2229,6 +2241,8 @@ map.on("load", async () => {
       updateDebugOverlay();
     } catch (err) {
       setRtStatus(`RT取得失敗: ${err.message}`, "error");
+    } finally {
+      isPollingVehicles = false;
     }
   }, 10000);
 });

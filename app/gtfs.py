@@ -53,7 +53,7 @@ def _read_csv_from_zip(archive: zipfile.ZipFile, name: str) -> list[dict[str, st
 
 
 def _color_from_route_id(route_id: str) -> str:
-    seed = hashlib.md5(route_id.encode("utf-8")).hexdigest()[:6]
+    seed = hashlib.md5(route_id.encode("utf-8"), usedforsecurity=False).hexdigest()[:6]
     return seed.upper()
 
 
@@ -97,10 +97,16 @@ def _project_point_to_segment(
     return _distance(point, projected), projected, ratio
 
 
+def _points_close(a: list[float] | tuple[float, float], b: list[float] | tuple[float, float], tol: float = 1e-7) -> bool:
+    return abs(a[0] - b[0]) <= tol and abs(a[1] - b[1]) <= tol
+
+
 def _project_point_to_polyline(
     point: list[float] | tuple[float, float],
     polyline: list[list[float]],
 ) -> tuple[float, list[float]]:
+    if not polyline:
+        return 0.0, [float(point[0]), float(point[1])]
     best_distance = float("inf")
     best_along = 0.0
     best_point = polyline[0]
@@ -133,6 +139,8 @@ def _polyline_cumulative_lengths(polyline: list[list[float]]) -> list[float]:
 
 
 def _point_at_distance(polyline: list[list[float]], distance_value: float) -> list[float]:
+    if not polyline:
+        return [0.0, 0.0]
     if len(polyline) < 2:
         return polyline[0]
 
@@ -179,7 +187,7 @@ def _extract_polyline_between(polyline: list[list[float]], start_distance: float
             result.append(_point_at_distance(polyline, start_distance))
 
         if segment_end <= end_distance:
-            if result[-1] != polyline[index + 1]:
+            if not _points_close(result[-1], polyline[index + 1]):
                 result.append(polyline[index + 1])
         else:
             result.append(_point_at_distance(polyline, end_distance))
@@ -442,7 +450,7 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
                 if not connection_coordinates:
                     connection_coordinates.extend(segment)
                 else:
-                    connection_coordinates.extend(segment[1:] if connection_coordinates[-1] == segment[0] else segment)
+                    connection_coordinates.extend(segment[1:] if _points_close(connection_coordinates[-1], segment[0]) else segment)
         else:
             connection_coordinates = [coord for _, _, coord in ordered_stops]
 

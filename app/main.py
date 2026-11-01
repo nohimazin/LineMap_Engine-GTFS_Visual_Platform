@@ -27,8 +27,7 @@ class ActiveDatasetsRequest(BaseModel):
 
 store = DataStore()
 rt_services: dict[str, RealtimeVehicleService] = {}
-rt_tasks: list[asyncio.Task] = []
-rt_task_gtfs_ids: set[str] = set()
+rt_tasks: dict[str, asyncio.Task] = {}
 
 static_dir = Path(__file__).resolve().parent.parent / "static"
 
@@ -36,28 +35,33 @@ static_dir = Path(__file__).resolve().parent.parent / "static"
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     for item in store.list_gtfs():
-        data = store.gtfs_data(item["gtfs_id"]) or {}
+        gid = item["gtfs_id"]
+        data = store.gtfs_data(gid) or {}
         config = data.get("gtfs_rt_config", {})
         service = RealtimeVehicleService()
         service.configure(config.get("gtfs_rt_url"), config.get("interval_sec", 10))
-        rt_services[item["gtfs_id"]] = service
-        rt_tasks.append(asyncio.create_task(service.polling_loop(lambda gid=item["gtfs_id"]: (store.gtfs_data(gid) or {}).get("trip_to_route", {}))))
-        rt_task_gtfs_ids.add(item["gtfs_id"])
+        rt_services[gid] = service
+        rt_tasks[gid] = asyncio.create_task(
+            service.polling_loop(lambda gid=gid: (store.gtfs_data(gid) or {}).get("trip_to_route", {}))
+        )
     try:
         yield
     finally:
-        for task in rt_tasks:
+        for task in rt_tasks.values():
             task.cancel()
-        for task in rt_tasks:
+        for task in list(rt_tasks.values()):
             with suppress(asyncio.CancelledError):
                 await task
+        rt_services.clear()
+        for service in list(rt_services.values()):
+            await service.close()
 
 
 app = FastAPI(title="LineMap Engine GTFS Visual Platform", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -102,7 +106,7 @@ async def upload_gtfs(
     interval_sec: int = Query(10, ge=5, le=60),
     vehicle_color: str = Query("#e4572e"),
 ) -> dict[str, int | str]:
-    if not file.filename.lower().endswith(".zip"):
+    if not file.filename or not file.filename.lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="GTFS ZIPファイルを指定してください。")
 
     raw_zip = await file.read()
@@ -129,9 +133,12 @@ async def upload_gtfs(
     service.configure(config.get("gtfs_rt_url"), config.get("interval_sec", 10))
     if config.get("gtfs_rt_url"):
         await service.fetch_once(parsed["trip_to_route"])
-    if gtfs_id not in rt_task_gtfs_ids:
-        rt_tasks.append(asyncio.create_task(service.polling_loop(lambda gid=gtfs_id: (store.gtfs_data(gid) or {}).get("trip_to_route", {}))))
-        rt_task_gtfs_ids.add(gtfs_id)
+
+    if gtfs_id in rt_tasks:
+        rt_tasks[gtfs_id].cancel()
+    rt_tasks[gtfs_id] = asyncio.create_task(
+        service.polling_loop(lambda gid=gtfs_id: (store.gtfs_data(gid) or {}).get("trip_to_route", {}))
+    )
 
     return {
         "message": "GTFSを登録しました。",
@@ -203,8 +210,18 @@ def gtfs_list() -> dict:
 
 
 @app.delete("/gtfs/delete")
-def delete_gtfs(gtfs_id: str) -> dict:
+async def delete_gtfs(gtfs_id: str) -> dict:
     if store.delete_gtfs(gtfs_id):
+        task = rt_tasks.pop(gtfs_id, None)
+        if task:
+            task.cancel()
+        rt_services.pop(gtfs_id, None)
+        task = rt_tasks.pop(gtfs_id, None)
+        if task:
+            task.cancel()
+        service = rt_services.pop(gtfs_id, None)
+        if service:
+            await service.close()
         return {
             "message": f"GTFS {gtfs_id} を削除しました",
             "list": store.list_gtfs(),
@@ -247,10 +264,10 @@ if __name__ == "__main__":
     app_dir = Path(__file__).resolve().parent
     project_dir = app_dir.parent
     uvicorn.run(
-        "main:app",
+        "app.main:app",
         host="127.0.0.1",
         port=8000,
         reload=True,
-        app_dir=str(app_dir),
+        app_dir=str(project_dir),
         reload_dirs=[str(project_dir)],
     )

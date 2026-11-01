@@ -7,6 +7,8 @@ from typing import Any
 import httpx
 from google.transit import gtfs_realtime_pb2
 
+MAX_GZIP_PAYLOAD_SIZE = 25 * 1024 * 1024  # 25MB limit to prevent decompression bombs
+
 
 class RealtimeVehicleService:
     def __init__(self) -> None:
@@ -48,7 +50,14 @@ class RealtimeVehicleService:
         self._consecutive_error_count = 0
 
     def configure(self, url: str | None, interval_sec: int | None = None) -> None:
-        self._url = url.strip() if url else None
+        new_url = url.strip() if url else None
+        if new_url != self._url:
+            self._url = new_url
+            self._last_error = None
+            self._last_error_unix = None
+            self._last_http_status = None
+            self._consecutive_error_count = 0
+            self._error_history = []
         if interval_sec is not None:
             self._interval_sec = max(5, min(interval_sec, 60))
         self._vehicles = {"type": "FeatureCollection", "features": []}
@@ -67,6 +76,8 @@ class RealtimeVehicleService:
 
             payload = response.content
             if payload[:2] == b"\x1f\x8b":
+                if len(payload) > MAX_GZIP_PAYLOAD_SIZE:
+                    raise ValueError("GTFS-RT payload exceeds maximum allowed size.")
                 payload = gzip.decompress(payload)
 
             feed = gtfs_realtime_pb2.FeedMessage()
