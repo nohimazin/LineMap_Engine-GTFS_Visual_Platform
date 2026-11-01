@@ -76,6 +76,14 @@ async def disable_cache_for_web_assets(request, call_next):
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
+def _namespace_vehicle_route_id(route_id: str, gtfs_id: str) -> str:
+    """Keep realtime route IDs consistent with IDs returned by active_map_data."""
+    route_id = str(route_id or "")
+    if not route_id or route_id.startswith(f"{gtfs_id}:"):
+        return route_id
+    return f"{gtfs_id}:{route_id}"
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(static_dir / "index.html")
@@ -119,6 +127,8 @@ async def upload_gtfs(
     config = store.gtfs_data(gtfs_id).get("gtfs_rt_config", {})
     service = rt_services.setdefault(gtfs_id, RealtimeVehicleService())
     service.configure(config.get("gtfs_rt_url"), config.get("interval_sec", 10))
+    if config.get("gtfs_rt_url"):
+        await service.fetch_once(parsed["trip_to_route"])
     if gtfs_id not in rt_task_gtfs_ids:
         rt_tasks.append(asyncio.create_task(service.polling_loop(lambda gid=gtfs_id: (store.gtfs_data(gid) or {}).get("trip_to_route", {}))))
         rt_task_gtfs_ids.add(gtfs_id)
@@ -176,6 +186,8 @@ def vehicles() -> dict:
             properties = {**feature.get("properties", {}), "dataset_id": gid, "vehicle_color": color}
             if properties.get("vehicle_id"):
                 properties["vehicle_id"] = f"{gid}:{properties['vehicle_id']}"
+            if properties.get("route_id"):
+                properties["route_id"] = _namespace_vehicle_route_id(properties["route_id"], gid)
             feature["properties"] = properties
             features.append(feature)
         statuses[gid] = service.status()
@@ -225,7 +237,7 @@ async def update_dataset_settings(payload: DatasetSettingsRequest) -> dict:
     return {
         "message": "GTFSとGTFS-RT設定を保存しました。",
         "gtfs_id": payload.gtfs_id,
-        "status": service.status(),
+        "status": {**service.status(), "vehicle_color": payload.vehicle_color},
     }
 
 

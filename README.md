@@ -111,7 +111,7 @@ uvicorn app.main:app --reload --port 8001
 
 ### 複数GTFSを表示する
 
-アップロード画面で `GTFS ID` を指定すると、複数のGTFSを登録できます。GTFS選択欄で複数項目を選択すると、路線・停留所・停留所連結線を同時に表示します。GTFS-RT URLを設定したデータは、それぞれのフィードから車両を取得し、登録した車両マーカー色で表示します。
+アップロード画面で `GTFS ID` を指定すると、複数のGTFSを登録できます。「GTFS / GTFS-RT設定」のGTFS一覧でチェックボックスをオンにすると、路線・停留所・停留所連結線を同時に表示します。各GTFS名の右側にある設定ボタンから個別設定画面を開けます。
 
 ```powershell
 curl.exe -F "file=@sample.zip" "http://127.0.0.1:8000/upload?gtfs_id=sample"
@@ -123,11 +123,10 @@ curl.exe -F "file=@sample.zip" "http://127.0.0.1:8000/upload?gtfs_id=sample"
 
 ### GTFS-RTを設定する
 
-1. 「GTFS-RT設定」のURLに Vehicle Positions の protobuf エンドポイントを入力します。
+1. GTFS個別設定画面のURLに Vehicle Positions の protobuf エンドポイントを入力します。
 2. GTFSごとに「車両マーカー色」を設定できます。新規アップロード時にも指定できます。
-2. 更新間隔を5～60秒で指定します。
-3. 「RT設定を保存」を押します。
-4. RT再接続が必要な場合は「RT再接続」を押します。
+3. 更新間隔を5～60秒で指定します。
+4. 「このGTFSの設定を保存」を押します。
 
 画面には最終更新時刻、最終成功時刻、更新間隔、接続状態、連続エラー回数などが表示されます。
 
@@ -165,6 +164,10 @@ GET  /stop_connections
 ```
 
 `gtfs_rt_url` は任意です。省略または空欄の場合はGTFS-RTを停止した状態でGTFSを登録します。`interval_sec` は5～60秒です。`/gtfs/active` には表示するGTFS IDの配列を指定します。
+
+GTFS-RT設定はGTFS IDごとに保存されます。設定画面で複数GTFSを選択している場合、GTFS-RT設定の保存対象は選択順の先頭のGTFSです。新規アップロード時にURLを指定した場合は、保存直後に初回取得を行います。
+
+画面上では「GTFS / GTFS-RT設定」からGTFSを選択し、「選択したGTFSの設定」で個別設定画面を開きます。GTFS-RT車両情報はGTFS個別設定画面で設定します。
 
 アップロードAPIのレスポンスには、`gtfs_id`、路線数、停留所数、停留所連結線数が含まれます。
 

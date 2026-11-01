@@ -101,6 +101,51 @@ body {
   display: none !important;
 }
 
+.gtfs-list {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.gtfs-list-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+.gtfs-list-row label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.84rem;
+}
+
+.gtfs-list-row input[type="checkbox"] {
+  width: auto;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+}
+
+.gtfs-list-row .gtfs-summary {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gtfs-list-row button {
+  width: auto;
+  flex: 0 0 auto;
+}
+
 .vehicle-marker {
   width: 16px;
   height: 16px;
@@ -216,6 +261,13 @@ select {
   border: 1px solid var(--border);
   padding: 8px 10px;
   font-family: inherit;
+}
+
+.vehicle-color-input {
+  width: 64px;
+  height: 36px;
+  padding: 2px;
+  cursor: pointer;
 }
 
 button {

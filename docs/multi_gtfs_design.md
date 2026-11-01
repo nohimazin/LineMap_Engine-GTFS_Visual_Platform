@@ -112,7 +112,7 @@ def active_gtfs(payload: ActiveDatasetsRequest) -> dict:
 ```
 
 ### Step 4: フロントエンド UI
-- 左パネルの上部に GTFS 選択ドロップダウンを追加
+- GTFS一覧にチェックボックスと個別設定ボタンを追加
 - 選択時に `/gtfs/active` を POST
 - 成功時にマップを再読み込み
 
@@ -123,7 +123,7 @@ def active_gtfs(payload: ActiveDatasetsRequest) -> dict:
 | メモリ枯渇 | 大規模 GTFS × 多数個の場合は今後改善、ひとまず複数保持に限定 |
 | API 方針 | 複数GTFSを前提としたAPIを使用する |
 | DB 容量 | アップロード制限は別途検討 |
-| UI の複雑さ増加 | ドロップダウン 1 つに限定 |
+| UI の複雑さ増加 | GTFS一覧をチェックボックスと個別設定画面に分離 |
 
 ## まとめ
 
