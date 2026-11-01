@@ -114,6 +114,7 @@ const hideLongRouteVehiclesToggle = document.getElementById("hideLongRouteVehicl
 const toggleStopsBtn = document.getElementById("toggleStopsBtn");
 const toggleVehiclesBtn = document.getElementById("toggleVehiclesBtn");
 const toggleStopConnectionsBtn = document.getElementById("toggleStopConnectionsBtn");
+const toggleMapFullscreenBtn = document.getElementById("toggleMapFullscreenBtn");
 const datasetSettingsDialog = document.getElementById("datasetSettingsDialog");
 const openDatasetSettingsBtn = document.getElementById("openDatasetSettingsBtn");
 const closeDatasetSettingsBtn = document.getElementById("closeDatasetSettingsBtn");
@@ -535,6 +536,32 @@ function syncDisplayControls() {
     const settingText = state.showStopConnections ? "ON" : "OFF";
     toggleStopConnectionsBtn.disabled = false;
     toggleStopConnectionsBtn.textContent = `停留所連結線 ${settingText}`;
+  }
+}
+
+function syncMapFullscreenControl() {
+  if (!toggleMapFullscreenBtn) return;
+  const isFullscreen = document.fullscreenElement === map.getContainer().parentElement;
+  toggleMapFullscreenBtn.textContent = isFullscreen ? "全画面終了" : "全画面";
+  toggleMapFullscreenBtn.setAttribute(
+    "aria-label",
+    isFullscreen ? "地図の全画面表示を終了" : "地図を全画面表示",
+  );
+}
+
+async function toggleMapFullscreen() {
+  const mapArea = map.getContainer().parentElement;
+  if (!mapArea) return;
+
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await mapArea.requestFullscreen();
+    }
+  } catch (error) {
+    console.warn("地図の全画面表示を切り替えられませんでした", error);
+    return;
   }
 }
 
@@ -1384,6 +1411,9 @@ function buildStopPopupHtml(properties) {
   const stopName = normalizeDisplayText(properties?.stop_name);
   const stopCode = normalizeDisplayText(properties?.stop_code);
   const stopId = normalizeDisplayText(properties?.stop_id);
+  const stopIds = Array.isArray(properties?.stop_ids)
+    ? properties.stop_ids.map(normalizeDisplayText).filter(Boolean)
+    : [];
   const parentStation = normalizeDisplayText(properties?.parent_station);
   const title = stopName || stopCode || `バス停 ${stopId || "不明"}`;
   const routes = Array.isArray(properties?.routes) ? properties.routes.filter(Boolean) : [];
@@ -1400,7 +1430,8 @@ function buildStopPopupHtml(properties) {
     `停留所名: <span class="stop-popup-name">${escapeHtml(title)}</span>`,
   ];
   if (state.showStopRouteIds) {
-    lines.push(`stop_id: ${escapeHtml(stopId || "不明")}`);
+    const displayedStopIds = stopIds.length > 0 ? stopIds : [stopId || "不明"];
+    lines.push(`stop_id: ${displayedStopIds.map(escapeHtml).join(", ")}`);
   }
   if (stopCode) {
     lines.push(`標柱コード: ${escapeHtml(stopCode)}`);
@@ -1460,6 +1491,27 @@ function resolveStopPropertiesById(stopId, fallbackProperties) {
     ...(fallbackProperties || {}),
     ...(matchedFeature?.properties || {}),
   };
+}
+
+function mergeStopProperties(features) {
+  const propertiesList = features
+    .map((feature) => feature?.properties || feature)
+    .filter((properties) => properties && typeof properties === "object");
+  if (propertiesList.length <= 1) {
+    return propertiesList[0] || {};
+  }
+
+  const merged = { ...propertiesList[0] };
+  const stopIds = [...new Set(propertiesList.map((properties) => normalizeDisplayText(properties.stop_id)).filter(Boolean))];
+  const arrayKeys = ["routes", "routes_all", "times"];
+  for (const key of arrayKeys) {
+    merged[key] = [...new Set(propertiesList.flatMap((properties) => (
+      Array.isArray(properties[key]) ? properties[key] : []
+    )))];
+  }
+  merged.stop_ids = stopIds;
+  merged.service_active_today = propertiesList.some((properties) => properties.service_active_today === true);
+  return merged;
 }
 
 async function resolveStopPropertiesWithApiFallback(stopId, fallbackProperties) {
@@ -2023,6 +2075,15 @@ function wireActions() {
 
   routeSearchInput.addEventListener("input", renderRouteList);
 
+  toggleMapFullscreenBtn?.addEventListener("click", () => {
+    toggleMapFullscreen();
+  });
+  document.addEventListener("fullscreenchange", () => {
+    syncMapFullscreenControl();
+    map.resize();
+  });
+  syncMapFullscreenControl();
+
   document.getElementById("toggleStopsBtn").addEventListener("click", () => {
     state.showStops = !state.showStops;
     applyDisplaySettings();
@@ -2098,10 +2159,12 @@ function wireActions() {
   });
 
   map.on("click", "stops-circle", async (e) => {
-    const f = e.features?.[0];
-    if (!f) return;
-    const p = f.properties || {};
-    await showStopPopup([e.lngLat.lng, e.lngLat.lat], p);
+    const features = e.features || [];
+    if (features.length === 0) return;
+    await showStopPopup(
+      [e.lngLat.lng, e.lngLat.lat],
+      mergeStopProperties(features),
+    );
   });
 
   map.on("click", "stop-connections-line-hit", (e) => {

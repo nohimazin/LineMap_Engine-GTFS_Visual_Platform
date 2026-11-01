@@ -128,3 +128,6 @@ def active_gtfs(payload: ActiveDatasetsRequest) -> dict:
 ## まとめ
 
 複数GTFSのアクティブ集合を保存し、統合GeoJSONとGTFS-RT車両を同時に返す。
+
+同一地点に複数GTFSの停留所が重なる場合は、地図クリック時に対象フィーチャーを
+1つのポップアップへ統合し、GTFSごとの停留所ID・路線・時刻をまとめて表示する。
