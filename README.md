@@ -172,7 +172,7 @@ GET  /stop_connections
 
 ```http
 GET  /vehicles
-POST /settings/gtfs_rt
+POST /settings/dataset
 ```
 
 設定リクエストの例:
@@ -180,7 +180,8 @@ POST /settings/gtfs_rt
 ```json
 {
   "gtfs_rt_url": "https://example.com/vehiclePositions.pb",
-  "interval_sec": 10
+  "interval_sec": 10,
+  "vehicle_color": "#e4572e"
 }
 ```
 

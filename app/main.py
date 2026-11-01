@@ -154,7 +154,11 @@ def stop_connections() -> dict:
 
 @app.get("/agency")
 def agency() -> dict[str, str]:
-    return {"agency_name": store.agency_name()}
+    names = [
+        (store.gtfs_data(gtfs_id) or {}).get("agency_name", "")
+        for gtfs_id in store.active_gtfs_ids()
+    ]
+    return {"agency_name": " / ".join(name for name in names if name)}
 
 
 @app.get("/vehicles")
@@ -207,15 +211,17 @@ def active_gtfs(payload: ActiveDatasetsRequest) -> dict:
 
 @app.post("/settings/dataset")
 async def update_dataset_settings(payload: DatasetSettingsRequest) -> dict:
-    if not store.select_gtfs(payload.gtfs_id):
+    data = store.gtfs_data(payload.gtfs_id)
+    if data is None:
         raise HTTPException(status_code=404, detail=f"GTFS {payload.gtfs_id} が見つかりません")
 
     service = rt_services.setdefault(payload.gtfs_id, RealtimeVehicleService())
     service.configure(str(payload.gtfs_rt_url) if payload.gtfs_rt_url else None, payload.interval_sec)
     status = service.status()
-    store.update_gtfs_rt_config(status["url"], status["interval_sec"], payload.vehicle_color)
+    store.update_gtfs_rt_config(payload.gtfs_id, status["url"], status["interval_sec"], payload.vehicle_color)
     if payload.gtfs_rt_url:
-        await service.fetch_once(store.trip_to_route())
+        await service.fetch_once(data.get("trip_to_route", {}))
+    status["vehicle_color"] = payload.vehicle_color
     return {
         "message": "GTFSとGTFS-RT設定を保存しました。",
         "gtfs_id": payload.gtfs_id,

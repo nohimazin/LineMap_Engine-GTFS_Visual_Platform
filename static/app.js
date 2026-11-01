@@ -34,28 +34,6 @@ function resolveInitialStyle(styleUrl) {
   return BASEMAP_STYLES.bright;
 }
 
-async function retryRtConnection() {
-  const url = document.getElementById("rtUrlInput").value.trim();
-  const interval = Number(document.getElementById("rtIntervalInput").value || "10");
-
-  try {
-    setRtStatus("再接続を試行しています...", "neutral");
-    // 再設定を投げてサービス側で再接続を促す
-    await api("/settings/gtfs_rt", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ gtfs_rt_url: url || null, interval_sec: interval }),
-    });
-
-    // 現在の状態を即座に取得して反映
-    const payload = await api("/vehicles");
-    renderRtStatus(payload.status);
-  } catch (err) {
-    setRtStatus(`再接続失敗: ${err.message}`, "error");
-    if (rtErrorDetails) rtErrorDetails.textContent = String(err.message || "");
-  }
-}
-
 const initialStyle = resolveInitialStyle(savedState.baseMapStyle);
 
 const map = new maplibregl.Map({

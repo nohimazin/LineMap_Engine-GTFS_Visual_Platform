@@ -9,7 +9,7 @@
 - バックエンド：`DataStore` クラスで 1 つの GTFS のみ保持
 - API：`/routes`, `/stops`, `/stop_connections` が固定データを返す
 - UI：マップに 1 つのデータセットのみ表示
-- DB：単一 GTFS の データを保存
+- DB：複数 GTFS のデータを保存
 
 ## 設計案
 
@@ -25,7 +25,7 @@ _gtfs_data: dict[str, {
     "route_catalog": [...]
 }]
 
-_current_gtfs_id: str  # 現在表示中のGTFS ID
+_active_gtfs_ids: list[str]  # 同時表示するGTFS ID
 ```
 
 #### API の拡張
@@ -66,7 +66,7 @@ POST /gtfs/active         # 同時表示する GTFS ID を設定
 - 将来的には DB キャッシュ層の導入を検討
 
 ### 2. API 方針
-- 旧単一GTFS APIとの互換性は維持せず、アクティブGTFS集合を返すAPIを正規のインターフェースとする
+- アクティブGTFS集合を受け取り、統合データを返すAPIを正規のインターフェースとする
   - `gtfs_id` が指定されない場合 → 最後にアップロードされた GTFS を使用
 
 ### 3. アップロード時の挙動
@@ -76,23 +76,23 @@ POST /gtfs/active         # 同時表示する GTFS ID を設定
 
 ## ステップバイステップ実装
 
-### Step 1: DB スキーマの拡張
+### Step 1: 保存形式
 ```sql
-ALTER TABLE blobs ADD COLUMN gtfs_id TEXT DEFAULT 'default';
-ALTER TABLE blobs DROP CONSTRAINT PRIMARY KEY;
-ALTER TABLE blobs ADD PRIMARY KEY (gtfs_id, key);
+blobs(key TEXT PRIMARY KEY, payload TEXT NOT NULL)
+gtfs_data = { gtfs_id: parsed_data }
+active_gtfs_ids = [gtfs_id, ...]
 ```
 
 ### Step 2: DataStore の拡張
 ```python
 def __init__(self):
     self._gtfs_data: dict[str, dict] = {}
-    self._current_gtfs_id: str = 'default'
+    self._active_gtfs_ids: list[str] = []
 
 def add_gtfs(self, gtfs_id: str, parsed_data: dict) -> None:
     # 新しい GTFS を追加
     
-def select_gtfs(self, gtfs_id: str) -> bool:
+def set_active_gtfs_ids(self, gtfs_ids: list[str]) -> None:
     # 表示対象の GTFS を変更
     
 def list_gtfs(self) -> list[dict]:
@@ -106,11 +106,9 @@ def gtfs_list() -> dict:
     return store.list_gtfs()
 
 @app.post("/gtfs/active")
-def gtfs_select(gtfs_id: str) -> dict:
-    if store.select_gtfs(gtfs_id):
-        return {"message": f"GTFS {gtfs_id} を選択しました"}
-    else:
-        raise HTTPException(status_code=404, detail=f"GTFS {gtfs_id} が見つかりません")
+def active_gtfs(payload: ActiveDatasetsRequest) -> dict:
+    store.set_active_gtfs_ids(payload.gtfs_ids)
+    return {"active_gtfs_ids": store.active_gtfs_ids()}
 ```
 
 ### Step 4: フロントエンド UI
@@ -123,7 +121,7 @@ def gtfs_select(gtfs_id: str) -> dict:
 | リスク | 対策 |
 |--------|------|
 | メモリ枯渇 | 大規模 GTFS × 多数個の場合は今後改善、ひとまず複数保持に限定 |
-| API 方針 | 複数GTFSを前提としたAPIを使用し、旧単一GTFS APIは提供しない |
+| API 方針 | 複数GTFSを前提としたAPIを使用する |
 | DB 容量 | アップロード制限は別途検討 |
 | UI の複雑さ増加 | ドロップダウン 1 つに限定 |
 
