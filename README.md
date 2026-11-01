@@ -39,7 +39,7 @@ GTFS と GTFS-RT を読み込み、路線・停留所・停留所連結線・リ
 ## 動作環境
 
 - Python 3.11 以降を推奨
-- インターネット接続（OpenFreeMapの地図タイルを利用する場合）
+- インターネット接続
 - GTFS ZIP ファイル
 - GTFS-RT を利用する場合は、Vehicle Positions のURL
 
