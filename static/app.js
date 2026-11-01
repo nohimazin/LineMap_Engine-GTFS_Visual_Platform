@@ -10,7 +10,7 @@ function readSavedJson(key, fallback) {
 
 const savedView = readSavedJson("linemap:view", null);
 const savedState = readSavedJson("linemap:state", {});
-const UI_BUILD_VERSION = "2026-11-01-round-trip-visibility-v1";
+const UI_BUILD_VERSION = "2026-11-01-stop-connection-ids-v1";
 const BASEMAP_STYLES = {
   liberty: "https://tiles.openfreemap.org/styles/liberty",
   bright: "https://tiles.openfreemap.org/styles/bright",
@@ -90,6 +90,7 @@ const state = {
   showStopConnections: savedState.showStopConnections ?? false,
   showTodayStopConnections: savedState.showTodayStopConnections ?? false,
   showTodayStops: savedState.showTodayStops ?? false,
+  showStopConnectionIds: savedState.showStopConnectionIds ?? false,
   showVehicles: savedState.showVehicles ?? true,
   showStopRouteIds: savedState.showStopRouteIds ?? false,
   showStopTimeSeconds: savedState.showStopTimeSeconds ?? false,
@@ -271,6 +272,7 @@ function saveUiState() {
       showStopConnections: state.showStopConnections,
       showTodayStopConnections: state.showTodayStopConnections,
       showTodayStops: state.showTodayStops,
+      showStopConnectionIds: state.showStopConnectionIds,
       showVehicles: state.showVehicles,
       showStopRouteIds: state.showStopRouteIds,
       showStopTimeSeconds: state.showStopTimeSeconds,
@@ -1810,6 +1812,14 @@ function wireActions() {
       saveUiState();
     });
   }
+  const showStopConnectionIdsToggle = document.getElementById("showStopConnectionIdsToggle");
+  if (showStopConnectionIdsToggle) {
+    showStopConnectionIdsToggle.checked = state.showStopConnectionIds;
+    showStopConnectionIdsToggle.addEventListener("change", () => {
+      state.showStopConnectionIds = showStopConnectionIdsToggle.checked;
+      saveUiState();
+    });
+  }
   const showVehicleIdsToggle = document.getElementById("showVehicleIdsToggle");
   if (showVehicleIdsToggle) {
     showVehicleIdsToggle.checked = state.showVehicleIds;
@@ -1966,10 +1976,13 @@ function wireActions() {
     if (!f) return;
     const p = f.properties || {};
     const routeName = getRouteDisplayName(p.route_id);
+    const identifiers = state.showStopConnectionIds
+      ? `<br/>route_id: ${escapeHtml(p.route_id)}<br/>trip_id: ${escapeHtml(p.trip_id)}`
+      : "";
     new maplibregl.Popup()
       .setLngLat(e.lngLat)
       .setHTML(
-        `<b>停留所連結線</b><br/>路線名: ${escapeHtml(routeName)}<br/>route_id: ${escapeHtml(p.route_id)}<br/>trip_id: ${escapeHtml(p.trip_id)}`,
+        `<b>停留所連結線</b><br/>路線名: ${escapeHtml(routeName)}${identifiers}`,
       )
       .addTo(map);
   });

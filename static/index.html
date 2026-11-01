@@ -78,6 +78,10 @@
               <input id="showTodayStopsToggle" type="checkbox" />
               <span>今日運行される便がない停留所を非表示にする</span>
             </label>
+            <label class="checkbox-row">
+              <input id="showStopConnectionIdsToggle" type="checkbox" />
+              <span>連結線のroute_id・trip_idを表示する</span>
+            </label>
             <label for="stopConnectionsWidthInput">線の太さ</label>
             <div class="inline-controls width-control-row">
               <input id="stopConnectionsWidthRange" type="range" min="1" max="20" step="0.05" />
@@ -219,6 +223,6 @@
 
     <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
     <script src="/static/performance-monitor.js?v=20260502f"></script>
-    <script src="/static/app.js?v=20261101-round-trip-visibility-v1"></script>
+    <script src="/static/app.js?v=20261101-stop-connection-ids-v1"></script>
   </body>
 </html>
