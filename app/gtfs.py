@@ -519,6 +519,7 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
                     "parent_station": stop_parent_station.get(stop_id, ""),
                     "routes": sorted(list(stop_to_routes.get(stop_id, set()))),
                     "times": sorted(list(stop_to_times.get(stop_id, set()))),
+                    "service_active_today": bool(stop_to_routes.get(stop_id)),
                     "service_date": service_date.isoformat(),
                     "service_label": service_label,
                 },

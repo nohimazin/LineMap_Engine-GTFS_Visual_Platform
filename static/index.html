@@ -61,7 +61,7 @@
         <section class="card card-group">
           <h2>⚙️ 表示設定</h2>
           <div class="card-subsection">
-            <h3>往復路線の統合</h3>
+            <h3>停留所連結線</h3>
             <label class="checkbox-row">
               <input id="mergeRoundTripToggle" type="checkbox" />
               <span>統合表示を有効にする</span>
@@ -70,6 +70,19 @@
               <option value="first">統合時カラー: route_idが小さい側</option>
               <option value="second">統合時カラー: route_idが大きい側</option>
             </select>
+            <label class="checkbox-row">
+              <input id="showTodayStopConnectionsToggle" type="checkbox" />
+              <span>今日運行される路線のみ表示する</span>
+            </label>
+            <label class="checkbox-row">
+              <input id="showTodayStopsToggle" type="checkbox" />
+              <span>今日運行される便がない停留所を非表示にする</span>
+            </label>
+            <label for="stopConnectionsWidthInput">線の太さ</label>
+            <div class="inline-controls width-control-row">
+              <input id="stopConnectionsWidthRange" type="range" min="1" max="20" step="0.05" />
+              <input id="stopConnectionsWidthInput" type="number" min="1" max="20" step="0.05" />
+            </div>
           </div>
           <div class="card-subsection">
             <h3>停留所ポップアップ</h3>
@@ -92,18 +105,6 @@
               <input id="showVehicleBearingToggle" type="checkbox" />
               <span>方位を表示する</span>
             </label>
-          </div>
-          <div class="card-subsection">
-            <h3>停留所連結線</h3>
-            <label class="checkbox-row">
-              <input id="showTodayStopConnectionsToggle" type="checkbox" />
-              <span>今日運行される便のみ表示する</span>
-            </label>
-            <label for="stopConnectionsWidthInput">線の太さ</label>
-            <div class="inline-controls width-control-row">
-              <input id="stopConnectionsWidthRange" type="range" min="1" max="20" step="0.05" />
-              <input id="stopConnectionsWidthInput" type="number" min="1" max="20" step="0.05" />
-            </div>
           </div>
         </section>
 
@@ -218,6 +219,6 @@
 
     <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
     <script src="/static/performance-monitor.js?v=20260502f"></script>
-    <script src="/static/app.js?v=20261101-stop-connection-filter-v1"></script>
+    <script src="/static/app.js?v=20261101-round-trip-visibility-v1"></script>
   </body>
 </html>

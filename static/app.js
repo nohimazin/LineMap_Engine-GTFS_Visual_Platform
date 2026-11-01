@@ -10,7 +10,7 @@ function readSavedJson(key, fallback) {
 
 const savedView = readSavedJson("linemap:view", null);
 const savedState = readSavedJson("linemap:state", {});
-const UI_BUILD_VERSION = "2026-11-01-stop-connection-filter-v1";
+const UI_BUILD_VERSION = "2026-11-01-round-trip-visibility-v1";
 const BASEMAP_STYLES = {
   liberty: "https://tiles.openfreemap.org/styles/liberty",
   bright: "https://tiles.openfreemap.org/styles/bright",
@@ -73,6 +73,7 @@ window.__linemapMap = map;
 const state = {
   rawRoutes: { type: "FeatureCollection", features: [] },
   rawRouteCatalog: [],
+  rawStops: { type: "FeatureCollection", features: [] },
   rawStopConnections: { type: "FeatureCollection", features: [] },
   routes: { type: "FeatureCollection", features: [] },
   routeCatalog: [],
@@ -84,9 +85,11 @@ const state = {
   routeToGroup: {},
   groupToRoutes: {},
   visibleRouteIds: new Set(savedState.visibleRouteIds || []),
+  visibleRawRouteIds: new Set(savedState.visibleRawRouteIds || savedState.visibleRouteIds || []),
   showStops: savedState.showStops ?? true,
   showStopConnections: savedState.showStopConnections ?? false,
   showTodayStopConnections: savedState.showTodayStopConnections ?? false,
+  showTodayStops: savedState.showTodayStops ?? false,
   showVehicles: savedState.showVehicles ?? true,
   showStopRouteIds: savedState.showStopRouteIds ?? false,
   showStopTimeSeconds: savedState.showStopTimeSeconds ?? false,
@@ -119,6 +122,7 @@ const stopConnectionsWidthInput = document.getElementById("stopConnectionsWidthI
 const showStopRouteIdsToggle = document.getElementById("showStopRouteIdsToggle");
 const showStopTimeSecondsToggle = document.getElementById("showStopTimeSecondsToggle");
 const showTodayStopConnectionsToggle = document.getElementById("showTodayStopConnectionsToggle");
+const showTodayStopsToggle = document.getElementById("showTodayStopsToggle");
 const toggleStopsBtn = document.getElementById("toggleStopsBtn");
 const toggleVehiclesBtn = document.getElementById("toggleVehiclesBtn");
 const toggleStopConnectionsBtn = document.getElementById("toggleStopConnectionsBtn");
@@ -262,9 +266,11 @@ function saveUiState() {
     "linemap:state",
     JSON.stringify({
       visibleRouteIds: Array.from(state.visibleRouteIds),
+      visibleRawRouteIds: Array.from(state.visibleRawRouteIds),
       showStops: state.showStops,
       showStopConnections: state.showStopConnections,
       showTodayStopConnections: state.showTodayStopConnections,
+      showTodayStops: state.showTodayStops,
       showVehicles: state.showVehicles,
       showStopRouteIds: state.showStopRouteIds,
       showStopTimeSeconds: state.showStopTimeSeconds,
@@ -484,7 +490,7 @@ function focusMapOnVehicles() {
 }
 
 function applyLayerVisibility() {
-  const stopConnectionsVisible = state.showStopConnections && !state.mergeRoundTrip;
+  const stopConnectionsVisible = state.showStopConnections;
   if (map.getLayer("stops-circle")) {
     map.setLayoutProperty("stops-circle", "visibility", state.showStops ? "visible" : "none");
   }
@@ -517,9 +523,7 @@ function syncDisplayControls() {
   if (toggleStopConnectionsBtn) {
     const settingText = state.showStopConnections ? "ON" : "OFF";
     toggleStopConnectionsBtn.disabled = false;
-    toggleStopConnectionsBtn.textContent = state.mergeRoundTrip
-      ? `停留所連結線 ${settingText}（統合表示中は非表示）`
-      : `停留所連結線 ${settingText}`;
+    toggleStopConnectionsBtn.textContent = `停留所連結線 ${settingText}`;
   }
 }
 
@@ -751,6 +755,18 @@ function parseDirectionalPair(longName) {
 }
 
 function buildRouteDirectionKey(route) {
+  const routeIdParts = String(route.route_id || "").split("_");
+  const routeCode = routeIdParts[1] || "";
+  if (
+    routeIdParts.length >= 4 &&
+    /^\d+[01]$/.test(routeCode) &&
+    routeIdParts[2] === "1"
+  ) {
+    const baseCode = routeCode.slice(0, -1);
+    const variantKey = [routeIdParts[0], baseCode, ...routeIdParts.slice(2)].join("_");
+    return `route-pair:${variantKey}`;
+  }
+
   const directionalPair = parseDirectionalPair(route.route_long_name || "");
   if (directionalPair) {
     const pair = [...directionalPair].sort();
@@ -768,6 +784,26 @@ function buildRouteDirectionKey(route) {
   }
 
   return `route:${String(route.route_id || "")}`;
+}
+
+function canMergeRoutePair(routeA, routeB) {
+  const routeKeyA = buildRouteDirectionKey(routeA);
+  const routeKeyB = buildRouteDirectionKey(routeB);
+  if (routeKeyA.startsWith("route-pair:") && routeKeyA === routeKeyB) {
+    return true;
+  }
+
+  const directionA = parseDirectionalPair(routeA.route_long_name || "");
+  const directionB = parseDirectionalPair(routeB.route_long_name || "");
+  if (directionA && directionB) {
+    const sameTerminals =
+      new Set(directionA).size === 2 &&
+      new Set(directionB).size === 2 &&
+      directionA.every((terminal) => directionB.includes(terminal));
+    const oppositeDirections = directionA[0] === directionB[1] && directionA[1] === directionB[0];
+    return sameTerminals && oppositeDirections;
+  }
+  return normalizeTerminalName(routeA.route_short_name || "") === normalizeTerminalName(routeB.route_short_name || "");
 }
 
 function buildMergedLabel(routes) {
@@ -788,6 +824,16 @@ function normalizeRouteId(value) {
 }
 
 function normalizeRouteDatasets() {
+  state.stops = {
+    type: "FeatureCollection",
+    features: (state.rawStops.features || []).filter(
+      (feature) =>
+        !state.showTodayStops ||
+        feature?.properties?.service_active_today === true ||
+        (feature?.properties?.service_active_today === undefined &&
+          (feature?.properties?.routes || []).length > 0),
+    ),
+  };
   const stopConnections = {
     type: "FeatureCollection",
     features: (state.rawStopConnections.features || []).filter(
@@ -804,6 +850,9 @@ function normalizeRouteDatasets() {
       state.routeToGroup[route.route_id] = route.route_id;
       state.groupToRoutes[route.route_id] = [route.route_id];
     });
+    state.visibleRouteIds = state.visibleRawRouteIds.size
+      ? new Set(Array.from(state.visibleRawRouteIds).filter((id) => state.routeToGroup[id]))
+      : new Set(state.routeCatalog.map((route) => route.route_id));
     return;
   }
 
@@ -816,13 +865,24 @@ function normalizeRouteDatasets() {
     groups.get(key).push(route);
   }
 
+  const mergeGroups = [];
+  for (const routes of groups.values()) {
+    if (routes.length === 2 && canMergeRoutePair(routes[0], routes[1])) {
+      mergeGroups.push(routes);
+    } else {
+      routes.forEach((route) => mergeGroups.push([route]));
+    }
+  }
+
   const mergedCatalog = [];
   const mergedById = {};
   const routeToGroup = {};
   const groupToRoutes = {};
-  for (const [key, routes] of groups.entries()) {
+  for (const routes of mergeGroups) {
     routes.sort((a, b) => String(a.route_id).localeCompare(String(b.route_id)));
-    const groupId = `merged:${key}`;
+    const groupId = routes.length === 2
+      ? `merged:${buildRouteDirectionKey(routes[0])}`
+      : routes[0].route_id;
     const colorRoute = state.mergeColorSide === "second" ? routes[routes.length - 1] : routes[0];
     const memberRouteIds = routes.map((route) => normalizeRouteId(route.route_id)).filter((routeId) => routeId);
 
@@ -929,7 +989,15 @@ function normalizeRouteDatasets() {
   for (const mergedItem of mergedCatalog) {
     const memberRouteIds = mergedItem.member_route_ids || [];
     const memberFeatures = memberRouteIds
-      .flatMap((rid) => connectionFeaturesByRouteId[normalizeRouteId(rid)] || [])
+      .map((rid) => {
+        const features = connectionFeaturesByRouteId[normalizeRouteId(rid)] || [];
+        return features.reduce((longest, feature) => {
+          if (!longest) return feature;
+          return lineLength(pickLongestLine(feature.geometry)) > lineLength(pickLongestLine(longest.geometry))
+            ? feature
+            : longest;
+        }, null);
+      })
       .filter(Boolean);
     if (memberFeatures.length === 0) {
       continue;
@@ -969,26 +1037,20 @@ function normalizeRouteDatasets() {
   state.stopConnections = mergedConnections;
   state.routeToGroup = routeToGroup;
   state.groupToRoutes = groupToRoutes;
+  const mergedVisibleRouteIds = state.visibleRawRouteIds.size
+    ? new Set(
+        mergedCatalog
+          .filter((route) => route.member_route_ids.some((id) => state.visibleRawRouteIds.has(id)))
+          .map((route) => route.route_id),
+      )
+    : new Set(mergedCatalog.map((route) => route.route_id));
+  state.visibleRouteIds = mergedVisibleRouteIds.size
+    ? mergedVisibleRouteIds
+    : new Set(mergedCatalog.map((route) => route.route_id));
 }
 
 function rebuildVisibleRouteIds() {
-  const availableRouteIds = new Set(state.routeCatalog.map((route) => route.route_id));
-  if (state.visibleRouteIds.size === 0) {
-    state.routeCatalog.forEach((route) => state.visibleRouteIds.add(route.route_id));
-    return;
-  }
-
-  const nextVisible = new Set();
-  for (const routeId of state.visibleRouteIds) {
-    if (availableRouteIds.has(routeId)) {
-      nextVisible.add(routeId);
-    }
-  }
-
-  if (nextVisible.size === 0) {
-    state.routeCatalog.forEach((route) => nextVisible.add(route.route_id));
-  }
-  state.visibleRouteIds = nextVisible;
+  normalizeRouteDatasets();
 }
 
 function createLayersIfNeeded() {
@@ -1043,7 +1105,7 @@ function createLayersIfNeeded() {
       paint: {
         "line-color": ["concat", "#", ["get", "route_color"]],
         "line-width": state.stopConnectionsLineWidth,
-        "line-opacity": 0.55,
+        "line-opacity": 0.95,
       },
       layout: { visibility: state.showStopConnections ? "visible" : "none" },
     });
@@ -1134,11 +1196,13 @@ function renderRouteList() {
     checkbox.type = "checkbox";
     checkbox.checked = state.visibleRouteIds.has(id);
     checkbox.addEventListener("change", () => {
+      const memberIds = state.groupToRoutes[id] || [id];
       if (checkbox.checked) {
-        state.visibleRouteIds.add(id);
+        memberIds.forEach((memberId) => state.visibleRawRouteIds.add(memberId));
       } else {
-        state.visibleRouteIds.delete(id);
+        memberIds.forEach((memberId) => state.visibleRawRouteIds.delete(memberId));
       }
+      normalizeRouteDatasets();
       updateRouteFilter();
       saveUiState();
     });
@@ -1350,7 +1414,7 @@ function resolveStopPropertiesById(stopId, fallbackProperties) {
     return fallbackProperties || {};
   }
 
-  const matchedFeature = (state.stops.features || []).find(
+  const matchedFeature = (state.rawStops.features || []).find(
     (feature) => normalizeDisplayText(feature?.properties?.stop_id) === normalizedStopId,
   );
   return {
@@ -1386,7 +1450,7 @@ async function resolveStopPropertiesWithApiFallback(stopId, fallbackProperties) 
 
 function performStopSearch(query) {
   const normalizedQuery = normalizeDisplayText(query).toLowerCase();
-  return (state.stops.features || [])
+  return (state.rawStops.features || [])
     .filter((feature) => {
       const properties = feature?.properties || {};
       const stopName = normalizeDisplayText(properties.stop_name).toLowerCase();
@@ -1507,7 +1571,7 @@ async function reloadAllData() {
 
   state.rawRoutes = routes;
   state.rawRouteCatalog = routeCatalog;
-  state.stops = stops;
+  state.rawStops = stops;
   state.rawStopConnections = stopConnections;
   state.agencyName = agencyPayload.agency_name || "";
   state.vehicles = vehiclesPayload.vehicles;
@@ -1732,6 +1796,15 @@ function wireActions() {
     showTodayStopConnectionsToggle.checked = state.showTodayStopConnections;
     showTodayStopConnectionsToggle.addEventListener("change", () => {
       state.showTodayStopConnections = showTodayStopConnectionsToggle.checked;
+      normalizeRouteDatasets();
+      refreshOverlayLayers();
+      saveUiState();
+    });
+  }
+  if (showTodayStopsToggle) {
+    showTodayStopsToggle.checked = state.showTodayStops;
+    showTodayStopsToggle.addEventListener("change", () => {
+      state.showTodayStops = showTodayStopsToggle.checked;
       normalizeRouteDatasets();
       refreshOverlayLayers();
       saveUiState();
