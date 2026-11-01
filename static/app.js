@@ -10,7 +10,7 @@ function readSavedJson(key, fallback) {
 
 const savedView = readSavedJson("linemap:view", null);
 const savedState = readSavedJson("linemap:state", {});
-const UI_BUILD_VERSION = "2026-11-01-stop-connection-ids-v1";
+const UI_BUILD_VERSION = "2026-11-01-long-route-filter-v2";
 const BASEMAP_STYLES = {
   liberty: "https://tiles.openfreemap.org/styles/liberty",
   bright: "https://tiles.openfreemap.org/styles/bright",
@@ -75,6 +75,7 @@ const state = {
   rawRouteCatalog: [],
   rawStops: { type: "FeatureCollection", features: [] },
   rawStopConnections: { type: "FeatureCollection", features: [] },
+  rawVehicles: { type: "FeatureCollection", features: [] },
   routes: { type: "FeatureCollection", features: [] },
   routeCatalog: [],
   stops: { type: "FeatureCollection", features: [] },
@@ -91,6 +92,10 @@ const state = {
   showTodayStopConnections: savedState.showTodayStopConnections ?? false,
   showTodayStops: savedState.showTodayStops ?? false,
   showStopConnectionIds: savedState.showStopConnectionIds ?? false,
+  hideLongStopConnections: savedState.hideLongStopConnections ?? false,
+  maxStopSpacingKm: savedState.maxStopSpacingKm ?? 10,
+  hideLongStopStations: savedState.hideLongStopStations ?? false,
+  hideLongRouteVehicles: savedState.hideLongRouteVehicles ?? false,
   showVehicles: savedState.showVehicles ?? true,
   showStopRouteIds: savedState.showStopRouteIds ?? false,
   showStopTimeSeconds: savedState.showStopTimeSeconds ?? false,
@@ -124,6 +129,10 @@ const showStopRouteIdsToggle = document.getElementById("showStopRouteIdsToggle")
 const showStopTimeSecondsToggle = document.getElementById("showStopTimeSecondsToggle");
 const showTodayStopConnectionsToggle = document.getElementById("showTodayStopConnectionsToggle");
 const showTodayStopsToggle = document.getElementById("showTodayStopsToggle");
+const hideLongStopConnectionsToggle = document.getElementById("hideLongStopConnectionsToggle");
+const maxStopSpacingInput = document.getElementById("maxStopSpacingInput");
+const hideLongStopStationsToggle = document.getElementById("hideLongStopStationsToggle");
+const hideLongRouteVehiclesToggle = document.getElementById("hideLongRouteVehiclesToggle");
 const toggleStopsBtn = document.getElementById("toggleStopsBtn");
 const toggleVehiclesBtn = document.getElementById("toggleVehiclesBtn");
 const toggleStopConnectionsBtn = document.getElementById("toggleStopConnectionsBtn");
@@ -273,6 +282,10 @@ function saveUiState() {
       showTodayStopConnections: state.showTodayStopConnections,
       showTodayStops: state.showTodayStops,
       showStopConnectionIds: state.showStopConnectionIds,
+      hideLongStopConnections: state.hideLongStopConnections,
+      maxStopSpacingKm: state.maxStopSpacingKm,
+      hideLongStopStations: state.hideLongStopStations,
+      hideLongRouteVehicles: state.hideLongRouteVehicles,
       showVehicles: state.showVehicles,
       showStopRouteIds: state.showStopRouteIds,
       showStopTimeSeconds: state.showStopTimeSeconds,
@@ -826,20 +839,41 @@ function normalizeRouteId(value) {
 }
 
 function normalizeRouteDatasets() {
+  const longRouteIds = new Set(
+    (state.rawStopConnections.features || [])
+      .filter((feature) => Number(feature?.properties?.max_stop_spacing_km || 0) > state.maxStopSpacingKm)
+      .map((feature) => normalizeRouteId(feature?.properties?.route_id))
+      .filter(Boolean),
+  );
   state.stops = {
     type: "FeatureCollection",
     features: (state.rawStops.features || []).filter(
       (feature) =>
-        !state.showTodayStops ||
-        feature?.properties?.service_active_today === true ||
-        (feature?.properties?.service_active_today === undefined &&
-          (feature?.properties?.routes || []).length > 0),
+        (!state.showTodayStops ||
+          feature?.properties?.service_active_today === true ||
+          (feature?.properties?.service_active_today === undefined &&
+            (feature?.properties?.routes || []).length > 0)) &&
+        (!state.hideLongStopStations ||
+          (feature?.properties?.routes_all || feature?.properties?.routes || []).some(
+            (routeId) => !longRouteIds.has(normalizeRouteId(routeId)),
+          )),
     ),
   };
   const stopConnections = {
     type: "FeatureCollection",
     features: (state.rawStopConnections.features || []).filter(
-      (feature) => !state.showTodayStopConnections || feature?.properties?.service_active_today === true,
+      (feature) =>
+        (!state.showTodayStopConnections || feature?.properties?.service_active_today === true) &&
+        (!state.hideLongStopConnections ||
+          Number(feature?.properties?.max_stop_spacing_km || 0) <= state.maxStopSpacingKm),
+    ),
+  };
+  state.vehicles = {
+    type: "FeatureCollection",
+    features: (state.rawVehicles.features || []).filter(
+      (feature) =>
+        !state.hideLongRouteVehicles ||
+        !longRouteIds.has(normalizeRouteId(feature?.properties?.route_id)),
     ),
   };
   if (!state.mergeRoundTrip) {
@@ -1025,6 +1059,13 @@ function normalizeRouteDatasets() {
         route_color:
           routeFeaturesByRouteId[mergedItem.color_source_route_id]?.properties?.route_color || mergedItem.route_color,
         member_route_ids: memberRouteIds,
+        max_stop_spacing_km: Math.max(
+          ...memberRouteIds.flatMap((rid) =>
+            (connectionFeaturesByRouteId[normalizeRouteId(rid)] || []).map(
+              (feature) => Number(feature?.properties?.max_stop_spacing_km || 0),
+            ),
+          ),
+        ),
         service_active_today: memberFeatures.some(
           (feature) => feature?.properties?.service_active_today === true,
         ),
@@ -1576,6 +1617,7 @@ async function reloadAllData() {
   state.rawStops = stops;
   state.rawStopConnections = stopConnections;
   state.agencyName = agencyPayload.agency_name || "";
+  state.rawVehicles = vehiclesPayload.vehicles;
   state.vehicles = vehiclesPayload.vehicles;
   focusMapOnVehicles();
 
@@ -1820,6 +1862,48 @@ function wireActions() {
       saveUiState();
     });
   }
+  if (hideLongStopConnectionsToggle) {
+    hideLongStopConnectionsToggle.checked = state.hideLongStopConnections;
+    hideLongStopConnectionsToggle.addEventListener("change", () => {
+      state.hideLongStopConnections = hideLongStopConnectionsToggle.checked;
+      normalizeRouteDatasets();
+      refreshOverlayLayers();
+      saveUiState();
+    });
+  }
+  if (maxStopSpacingInput) {
+    maxStopSpacingInput.value = String(state.maxStopSpacingKm);
+    maxStopSpacingInput.addEventListener("change", () => {
+      const value = Number(maxStopSpacingInput.value);
+      if (!Number.isFinite(value) || value <= 0) {
+        maxStopSpacingInput.value = String(state.maxStopSpacingKm);
+        return;
+      }
+      state.maxStopSpacingKm = value;
+      normalizeRouteDatasets();
+      refreshOverlayLayers();
+      saveUiState();
+    });
+  }
+  const refreshLongRouteFilters = () => {
+    normalizeRouteDatasets();
+    refreshOverlayLayers();
+    saveUiState();
+  };
+  if (hideLongStopStationsToggle) {
+    hideLongStopStationsToggle.checked = state.hideLongStopStations;
+    hideLongStopStationsToggle.addEventListener("change", () => {
+      state.hideLongStopStations = hideLongStopStationsToggle.checked;
+      refreshLongRouteFilters();
+    });
+  }
+  if (hideLongRouteVehiclesToggle) {
+    hideLongRouteVehiclesToggle.checked = state.hideLongRouteVehicles;
+    hideLongRouteVehiclesToggle.addEventListener("change", () => {
+      state.hideLongRouteVehicles = hideLongRouteVehiclesToggle.checked;
+      refreshLongRouteFilters();
+    });
+  }
   const showVehicleIdsToggle = document.getElementById("showVehicleIdsToggle");
   if (showVehicleIdsToggle) {
     showVehicleIdsToggle.checked = state.showVehicleIds;
@@ -2024,7 +2108,8 @@ map.on("load", async () => {
     try {
       const payload = await api("/vehicles");
       const hadVehicles = state.vehicles.features?.length > 0;
-      state.vehicles = payload.vehicles;
+      state.rawVehicles = payload.vehicles;
+      normalizeRouteDatasets();
       map.getSource("vehicles")?.setData(state.vehicles);
       syncVehicleMarkers();
       if (!hadVehicles) focusMapOnVehicles();

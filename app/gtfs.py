@@ -3,8 +3,19 @@ import hashlib
 import io
 import zipfile
 from datetime import date
+from math import asin, cos, radians, sin, sqrt
 from collections import defaultdict
 from typing import Any
+
+
+def _distance_km(coord_a: list[float], coord_b: list[float]) -> float:
+    earth_radius_km = 6371.0088
+    lon_a, lat_a = map(radians, coord_a)
+    lon_b, lat_b = map(radians, coord_b)
+    delta_lon = lon_b - lon_a
+    delta_lat = lat_b - lat_a
+    haversine = sin(delta_lat / 2) ** 2 + cos(lat_a) * cos(lat_b) * sin(delta_lon / 2) ** 2
+    return 2 * earth_radius_km * asin(sqrt(haversine))
 
 
 def _read_csv_from_zip(archive: zipfile.ZipFile, name: str) -> list[dict[str, str]]:
@@ -396,6 +407,11 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
         if len(ordered_stops) < 2:
             continue
 
+        max_stop_spacing_km = max(
+            _distance_km(ordered_stops[index][2], ordered_stops[index + 1][2])
+            for index in range(len(ordered_stops) - 1)
+        )
+
         stop_id_sequence = tuple(stop_id for _, stop_id, _ in ordered_stops)
         dedup_shape_key = shape_id if shape_id else "stops"
         connection_key = (route_id, dedup_shape_key, stop_id_sequence)
@@ -446,6 +462,7 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
                     "trip_id": trip_id,
                     "shape_id": shape_id,
                     "stop_count": len(ordered_stops),
+                    "max_stop_spacing_km": round(max_stop_spacing_km, 3),
                     "service_active_today": service_active_today,
                 },
             }
@@ -485,6 +502,7 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
     
     # 停留所ごとの通過路線・発時刻を辞書で事前計算
     stop_to_routes: dict[str, set[str]] = defaultdict(set)
+    stop_to_all_routes: dict[str, set[str]] = defaultdict(set)
     stop_to_times: dict[str, set[str]] = defaultdict(set)
     
     # Trip -> Stop時刻マッピングを事前構築（効率改善）
@@ -497,7 +515,11 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
             trip_stop_times_map[(trip_id, stop_id)] = arrival_time
     
     for trip_id, stop_times in trip_stop_times.items():
+        all_route_id = trip_to_route_all.get(trip_id, "")
         route_id = trip_to_route.get(trip_id, "")
+        if all_route_id:
+            for _, stop_id in stop_times:
+                stop_to_all_routes[stop_id].add(all_route_id)
         if not route_id:
             continue
         for sequence, stop_id in stop_times:
@@ -518,6 +540,7 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
                     "stop_code": stop_codes.get(stop_id, ""),
                     "parent_station": stop_parent_station.get(stop_id, ""),
                     "routes": sorted(list(stop_to_routes.get(stop_id, set()))),
+                    "routes_all": sorted(list(stop_to_all_routes.get(stop_id, set()))),
                     "times": sorted(list(stop_to_times.get(stop_id, set()))),
                     "service_active_today": bool(stop_to_routes.get(stop_id)),
                     "service_date": service_date.isoformat(),
