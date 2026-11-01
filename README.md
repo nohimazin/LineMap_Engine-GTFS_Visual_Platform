@@ -18,6 +18,16 @@ GTFS と GTFS-RT を読み込み、路線・停留所・停留所連結線・リ
 - 往復路線の統合表示と統合時カラーの選択
 - 停留所、車両、停留所連結線の表示切替
 - 停留所連結線の線幅変更（1～20）
+- 停留所連結線ポップアップのroute_id・trip_id表示を切り替え可能（既定: 非表示）
+- 高速バス など長距離便としてみなす最大停留所間隔を変更可能
+- 長距離便の連結線の非表示を切り替え可能（既定: 無効）
+- 長距離路線のみ通過する停留所の非表示を切り替え可能（既定: 無効）
+- 長距離路線を通る車両の非表示を切り替え可能（既定: 無効）
+- 停留所連結線を全便表示（既定）または今日運行される便のみに切り替え
+- 今日運行される便がない停留所アイコンの表示・非表示を切り替え（既定: 表示）
+- 停留所ポップアップの時刻について、秒数表示を選択可能（既定: 非表示）
+- GTFSの`calendar.txt`/`calendar_dates.txt`から今日の運行対象便を判定し、「今日（年月日・曜日）の時刻」として表示
+- 今日の時刻は現在時刻の前後60分以内を表示し、該当がない場合は現在時刻に近い3件を表示
 - GTFS-RT Vehicle Positions の定期取得と車両表示
 - 車両の方位、速度、路線などのポップアップ表示
 - OpenFreeMap の Liberty / Bright / Positron 切替
@@ -94,7 +104,8 @@ uvicorn app.main:app --reload --port 8001
 次のファイルは、存在する場合に利用されます。
 
 - `shapes.txt`: 路線の詳細形状
-- `stop_times.txt`: 停留所の順序と簡易時刻情報
+- `stop_times.txt`: 停留所の順序と時刻情報
+- `calendar.txt` / `calendar_dates.txt`: 今日の運行対象便の判定に利用
 
 `shapes.txt` がない、または路線形状を生成できない場合は、`stop_times.txt` と停留所位置から停留所連結線を生成して路線表示に利用します。
 
@@ -107,6 +118,8 @@ curl.exe -F "file=@sample.zip" "http://127.0.0.1:8000/upload?gtfs_id=sample"
 ```
 
 登録済みGTFSのGeoJSONと選択状態は `data/linemap.db` に保存され、アプリ再起動後も一覧と切替状態を復元します。
+
+新規GTFSのアップロード画面では、GTFS-RT Vehicle Positions URLと更新間隔も同時に設定できます。URLを空欄にした場合も、GTFS-RT未設定のまま保存して画面を閉じられます。
 
 ### GTFS-RTを設定する
 
@@ -140,7 +153,7 @@ GET /health
 ### GTFS
 
 ```http
-POST /upload?gtfs_id=default
+POST /upload?gtfs_id=default&gtfs_rt_url=https%3A%2F%2Fexample.com%2FvehiclePositions.pb&interval_sec=10
 POST /upload_gtfs?gtfs_id=default
 GET  /gtfs_list
 POST /gtfs/select?gtfs_id=default
@@ -149,6 +162,8 @@ GET  /route_catalog
 GET  /stops
 GET  /stop_connections
 ```
+
+`gtfs_rt_url` は任意です。省略または空欄の場合はGTFS-RTを停止した状態でGTFSを登録します。`interval_sec` は5～60秒です。
 
 アップロードAPIのレスポンスには、`gtfs_id`、路線数、停留所数、停留所連結線数が含まれます。
 
@@ -218,7 +233,6 @@ PerformanceMonitor.help()
 - ブラウザをハードリロードします。
 - 開発者ツールのコンソールでJavaScriptエラーを確認します。
 - GTFS読み込み完了後に操作します。
-- 停留所連結線は、往復路線の統合表示中は仕様上非表示になります。
 
 ### 車両が表示されない
 
@@ -257,7 +271,7 @@ tests/
 - GTFSの表記ゆれが大きい場合、往復路線の統合判定が意図と異なることがあります。
 - 統合表示の中間線は形状の近似処理を含むため、実道路上の経路と完全には一致しない場合があります。
 - GTFS-RTはVehicle Positionsを対象としており、Trip UpdatesやService Alertsは対象外です。
-- 複数GTFSの登録一覧は現在メモリ管理で、アプリ再起動後も保持する管理機能は未実装です。
+- 複数GTFSの登録データと選択状態はSQLiteに保存され、アプリ再起動後も復元されます。
 - OpenFreeMapの表示には外部タイルサービスへの接続が必要です。
 
 ## 関連ドキュメント

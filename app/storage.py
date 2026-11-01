@@ -125,9 +125,15 @@ class DataStore:
         trip_to_route: dict[str, str],
         route_catalog: list[dict[str, Any]],
         agency_name: str = "",
+        gtfs_rt_url: str | None = None,
+        interval_sec: int = 10,
         gtfs_id: str = "default",
     ) -> None:
         with self._lock:
+            rt_config = {
+                "gtfs_rt_url": gtfs_rt_url,
+                "interval_sec": max(5, min(interval_sec, 60)),
+            }
             data = {
                 "agency_name": agency_name,
                 "routes_geojson": routes_geojson,
@@ -135,7 +141,7 @@ class DataStore:
                 "stop_connections_geojson": stop_connections_geojson,
                 "trip_to_route": trip_to_route,
                 "route_catalog": route_catalog,
-                "gtfs_rt_config": {"gtfs_rt_url": None, "interval_sec": 10},
+                "gtfs_rt_config": rt_config,
             }
             self._gtfs_data[gtfs_id] = data
             self._current_gtfs_id = gtfs_id
@@ -145,6 +151,7 @@ class DataStore:
             self._stop_connections_geojson = stop_connections_geojson
             self._trip_to_route = trip_to_route
             self._route_catalog = route_catalog
+            self._gtfs_rt_config = dict(rt_config)
 
             self._save_blob("gtfs_data", self._gtfs_data)
             self._save_blob("current_gtfs_id", self._current_gtfs_id)

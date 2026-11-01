@@ -10,7 +10,7 @@ function readSavedJson(key, fallback) {
 
 const savedView = readSavedJson("linemap:view", null);
 const savedState = readSavedJson("linemap:state", {});
-const UI_BUILD_VERSION = "2026-05-02-display-settings-v1";
+const UI_BUILD_VERSION = "2026-11-01-long-route-filter-v2";
 const BASEMAP_STYLES = {
   liberty: "https://tiles.openfreemap.org/styles/liberty",
   bright: "https://tiles.openfreemap.org/styles/bright",
@@ -73,7 +73,9 @@ window.__linemapMap = map;
 const state = {
   rawRoutes: { type: "FeatureCollection", features: [] },
   rawRouteCatalog: [],
+  rawStops: { type: "FeatureCollection", features: [] },
   rawStopConnections: { type: "FeatureCollection", features: [] },
+  rawVehicles: { type: "FeatureCollection", features: [] },
   routes: { type: "FeatureCollection", features: [] },
   routeCatalog: [],
   stops: { type: "FeatureCollection", features: [] },
@@ -84,10 +86,19 @@ const state = {
   routeToGroup: {},
   groupToRoutes: {},
   visibleRouteIds: new Set(savedState.visibleRouteIds || []),
+  visibleRawRouteIds: new Set(savedState.visibleRawRouteIds || savedState.visibleRouteIds || []),
   showStops: savedState.showStops ?? true,
   showStopConnections: savedState.showStopConnections ?? false,
+  showTodayStopConnections: savedState.showTodayStopConnections ?? false,
+  showTodayStops: savedState.showTodayStops ?? false,
+  showStopConnectionIds: savedState.showStopConnectionIds ?? false,
+  hideLongStopConnections: savedState.hideLongStopConnections ?? false,
+  maxStopSpacingKm: savedState.maxStopSpacingKm ?? 10,
+  hideLongStopStations: savedState.hideLongStopStations ?? false,
+  hideLongRouteVehicles: savedState.hideLongRouteVehicles ?? false,
   showVehicles: savedState.showVehicles ?? true,
   showStopRouteIds: savedState.showStopRouteIds ?? false,
+  showStopTimeSeconds: savedState.showStopTimeSeconds ?? false,
   showVehicleIds: savedState.showVehicleIds ?? false,
   showVehicleBearing: savedState.showVehicleBearing ?? false,
   mergeRoundTrip: savedState.mergeRoundTrip ?? false,
@@ -115,6 +126,13 @@ const mergeColorSideSelect = document.getElementById("mergeColorSideSelect");
 const stopConnectionsWidthRange = document.getElementById("stopConnectionsWidthRange");
 const stopConnectionsWidthInput = document.getElementById("stopConnectionsWidthInput");
 const showStopRouteIdsToggle = document.getElementById("showStopRouteIdsToggle");
+const showStopTimeSecondsToggle = document.getElementById("showStopTimeSecondsToggle");
+const showTodayStopConnectionsToggle = document.getElementById("showTodayStopConnectionsToggle");
+const showTodayStopsToggle = document.getElementById("showTodayStopsToggle");
+const hideLongStopConnectionsToggle = document.getElementById("hideLongStopConnectionsToggle");
+const maxStopSpacingInput = document.getElementById("maxStopSpacingInput");
+const hideLongStopStationsToggle = document.getElementById("hideLongStopStationsToggle");
+const hideLongRouteVehiclesToggle = document.getElementById("hideLongRouteVehiclesToggle");
 const toggleStopsBtn = document.getElementById("toggleStopsBtn");
 const toggleVehiclesBtn = document.getElementById("toggleVehiclesBtn");
 const toggleStopConnectionsBtn = document.getElementById("toggleStopConnectionsBtn");
@@ -258,10 +276,19 @@ function saveUiState() {
     "linemap:state",
     JSON.stringify({
       visibleRouteIds: Array.from(state.visibleRouteIds),
+      visibleRawRouteIds: Array.from(state.visibleRawRouteIds),
       showStops: state.showStops,
       showStopConnections: state.showStopConnections,
+      showTodayStopConnections: state.showTodayStopConnections,
+      showTodayStops: state.showTodayStops,
+      showStopConnectionIds: state.showStopConnectionIds,
+      hideLongStopConnections: state.hideLongStopConnections,
+      maxStopSpacingKm: state.maxStopSpacingKm,
+      hideLongStopStations: state.hideLongStopStations,
+      hideLongRouteVehicles: state.hideLongRouteVehicles,
       showVehicles: state.showVehicles,
       showStopRouteIds: state.showStopRouteIds,
+      showStopTimeSeconds: state.showStopTimeSeconds,
       showVehicleIds: state.showVehicleIds,
       showVehicleBearing: state.showVehicleBearing,
       mergeRoundTrip: state.mergeRoundTrip,
@@ -478,7 +505,7 @@ function focusMapOnVehicles() {
 }
 
 function applyLayerVisibility() {
-  const stopConnectionsVisible = state.showStopConnections && !state.mergeRoundTrip;
+  const stopConnectionsVisible = state.showStopConnections;
   if (map.getLayer("stops-circle")) {
     map.setLayoutProperty("stops-circle", "visibility", state.showStops ? "visible" : "none");
   }
@@ -511,9 +538,7 @@ function syncDisplayControls() {
   if (toggleStopConnectionsBtn) {
     const settingText = state.showStopConnections ? "ON" : "OFF";
     toggleStopConnectionsBtn.disabled = false;
-    toggleStopConnectionsBtn.textContent = state.mergeRoundTrip
-      ? `停留所連結線 ${settingText}（統合表示中は非表示）`
-      : `停留所連結線 ${settingText}`;
+    toggleStopConnectionsBtn.textContent = `停留所連結線 ${settingText}`;
   }
 }
 
@@ -745,6 +770,18 @@ function parseDirectionalPair(longName) {
 }
 
 function buildRouteDirectionKey(route) {
+  const routeIdParts = String(route.route_id || "").split("_");
+  const routeCode = routeIdParts[1] || "";
+  if (
+    routeIdParts.length >= 4 &&
+    /^\d+[01]$/.test(routeCode) &&
+    routeIdParts[2] === "1"
+  ) {
+    const baseCode = routeCode.slice(0, -1);
+    const variantKey = [routeIdParts[0], baseCode, ...routeIdParts.slice(2)].join("_");
+    return `route-pair:${variantKey}`;
+  }
+
   const directionalPair = parseDirectionalPair(route.route_long_name || "");
   if (directionalPair) {
     const pair = [...directionalPair].sort();
@@ -762,6 +799,26 @@ function buildRouteDirectionKey(route) {
   }
 
   return `route:${String(route.route_id || "")}`;
+}
+
+function canMergeRoutePair(routeA, routeB) {
+  const routeKeyA = buildRouteDirectionKey(routeA);
+  const routeKeyB = buildRouteDirectionKey(routeB);
+  if (routeKeyA.startsWith("route-pair:") && routeKeyA === routeKeyB) {
+    return true;
+  }
+
+  const directionA = parseDirectionalPair(routeA.route_long_name || "");
+  const directionB = parseDirectionalPair(routeB.route_long_name || "");
+  if (directionA && directionB) {
+    const sameTerminals =
+      new Set(directionA).size === 2 &&
+      new Set(directionB).size === 2 &&
+      directionA.every((terminal) => directionB.includes(terminal));
+    const oppositeDirections = directionA[0] === directionB[1] && directionA[1] === directionB[0];
+    return sameTerminals && oppositeDirections;
+  }
+  return normalizeTerminalName(routeA.route_short_name || "") === normalizeTerminalName(routeB.route_short_name || "");
 }
 
 function buildMergedLabel(routes) {
@@ -782,16 +839,56 @@ function normalizeRouteId(value) {
 }
 
 function normalizeRouteDatasets() {
+  const longRouteIds = new Set(
+    (state.rawStopConnections.features || [])
+      .filter((feature) => Number(feature?.properties?.max_stop_spacing_km || 0) > state.maxStopSpacingKm)
+      .map((feature) => normalizeRouteId(feature?.properties?.route_id))
+      .filter(Boolean),
+  );
+  state.stops = {
+    type: "FeatureCollection",
+    features: (state.rawStops.features || []).filter(
+      (feature) =>
+        (!state.showTodayStops ||
+          feature?.properties?.service_active_today === true ||
+          (feature?.properties?.service_active_today === undefined &&
+            (feature?.properties?.routes || []).length > 0)) &&
+        (!state.hideLongStopStations ||
+          (feature?.properties?.routes_all || feature?.properties?.routes || []).some(
+            (routeId) => !longRouteIds.has(normalizeRouteId(routeId)),
+          )),
+    ),
+  };
+  const stopConnections = {
+    type: "FeatureCollection",
+    features: (state.rawStopConnections.features || []).filter(
+      (feature) =>
+        (!state.showTodayStopConnections || feature?.properties?.service_active_today === true) &&
+        (!state.hideLongStopConnections ||
+          Number(feature?.properties?.max_stop_spacing_km || 0) <= state.maxStopSpacingKm),
+    ),
+  };
+  state.vehicles = {
+    type: "FeatureCollection",
+    features: (state.rawVehicles.features || []).filter(
+      (feature) =>
+        !state.hideLongRouteVehicles ||
+        !longRouteIds.has(normalizeRouteId(feature?.properties?.route_id)),
+    ),
+  };
   if (!state.mergeRoundTrip) {
     state.routes = deepClone(state.rawRoutes);
     state.routeCatalog = deepClone(state.rawRouteCatalog);
-    state.stopConnections = deepClone(state.rawStopConnections);
+    state.stopConnections = deepClone(stopConnections);
     state.routeToGroup = {};
     state.groupToRoutes = {};
     state.routeCatalog.forEach((route) => {
       state.routeToGroup[route.route_id] = route.route_id;
       state.groupToRoutes[route.route_id] = [route.route_id];
     });
+    state.visibleRouteIds = state.visibleRawRouteIds.size
+      ? new Set(Array.from(state.visibleRawRouteIds).filter((id) => state.routeToGroup[id]))
+      : new Set(state.routeCatalog.map((route) => route.route_id));
     return;
   }
 
@@ -804,13 +901,24 @@ function normalizeRouteDatasets() {
     groups.get(key).push(route);
   }
 
+  const mergeGroups = [];
+  for (const routes of groups.values()) {
+    if (routes.length === 2 && canMergeRoutePair(routes[0], routes[1])) {
+      mergeGroups.push(routes);
+    } else {
+      routes.forEach((route) => mergeGroups.push([route]));
+    }
+  }
+
   const mergedCatalog = [];
   const mergedById = {};
   const routeToGroup = {};
   const groupToRoutes = {};
-  for (const [key, routes] of groups.entries()) {
+  for (const routes of mergeGroups) {
     routes.sort((a, b) => String(a.route_id).localeCompare(String(b.route_id)));
-    const groupId = `merged:${key}`;
+    const groupId = routes.length === 2
+      ? `merged:${buildRouteDirectionKey(routes[0])}`
+      : routes[0].route_id;
     const colorRoute = state.mergeColorSide === "second" ? routes[routes.length - 1] : routes[0];
     const memberRouteIds = routes.map((route) => normalizeRouteId(route.route_id)).filter((routeId) => routeId);
 
@@ -903,17 +1011,30 @@ function normalizeRouteDatasets() {
   }
 
   const connectionFeaturesByRouteId = {};
-  for (const feature of state.rawStopConnections.features || []) {
+  for (const feature of stopConnections.features || []) {
     const rid = normalizeRouteId(feature?.properties?.route_id);
     if (rid) {
-      connectionFeaturesByRouteId[rid] = feature;
+      if (!connectionFeaturesByRouteId[rid]) {
+        connectionFeaturesByRouteId[rid] = [];
+      }
+      connectionFeaturesByRouteId[rid].push(feature);
     }
   }
 
   const mergedConnectionFeatures = [];
   for (const mergedItem of mergedCatalog) {
     const memberRouteIds = mergedItem.member_route_ids || [];
-    const memberFeatures = memberRouteIds.map((rid) => connectionFeaturesByRouteId[normalizeRouteId(rid)]).filter(Boolean);
+    const memberFeatures = memberRouteIds
+      .map((rid) => {
+        const features = connectionFeaturesByRouteId[normalizeRouteId(rid)] || [];
+        return features.reduce((longest, feature) => {
+          if (!longest) return feature;
+          return lineLength(pickLongestLine(feature.geometry)) > lineLength(pickLongestLine(longest.geometry))
+            ? feature
+            : longest;
+        }, null);
+      })
+      .filter(Boolean);
     if (memberFeatures.length === 0) {
       continue;
     }
@@ -938,6 +1059,16 @@ function normalizeRouteDatasets() {
         route_color:
           routeFeaturesByRouteId[mergedItem.color_source_route_id]?.properties?.route_color || mergedItem.route_color,
         member_route_ids: memberRouteIds,
+        max_stop_spacing_km: Math.max(
+          ...memberRouteIds.flatMap((rid) =>
+            (connectionFeaturesByRouteId[normalizeRouteId(rid)] || []).map(
+              (feature) => Number(feature?.properties?.max_stop_spacing_km || 0),
+            ),
+          ),
+        ),
+        service_active_today: memberFeatures.some(
+          (feature) => feature?.properties?.service_active_today === true,
+        ),
       },
     });
   }
@@ -949,26 +1080,20 @@ function normalizeRouteDatasets() {
   state.stopConnections = mergedConnections;
   state.routeToGroup = routeToGroup;
   state.groupToRoutes = groupToRoutes;
+  const mergedVisibleRouteIds = state.visibleRawRouteIds.size
+    ? new Set(
+        mergedCatalog
+          .filter((route) => route.member_route_ids.some((id) => state.visibleRawRouteIds.has(id)))
+          .map((route) => route.route_id),
+      )
+    : new Set(mergedCatalog.map((route) => route.route_id));
+  state.visibleRouteIds = mergedVisibleRouteIds.size
+    ? mergedVisibleRouteIds
+    : new Set(mergedCatalog.map((route) => route.route_id));
 }
 
 function rebuildVisibleRouteIds() {
-  const availableRouteIds = new Set(state.routeCatalog.map((route) => route.route_id));
-  if (state.visibleRouteIds.size === 0) {
-    state.routeCatalog.forEach((route) => state.visibleRouteIds.add(route.route_id));
-    return;
-  }
-
-  const nextVisible = new Set();
-  for (const routeId of state.visibleRouteIds) {
-    if (availableRouteIds.has(routeId)) {
-      nextVisible.add(routeId);
-    }
-  }
-
-  if (nextVisible.size === 0) {
-    state.routeCatalog.forEach((route) => nextVisible.add(route.route_id));
-  }
-  state.visibleRouteIds = nextVisible;
+  normalizeRouteDatasets();
 }
 
 function createLayersIfNeeded() {
@@ -1023,7 +1148,7 @@ function createLayersIfNeeded() {
       paint: {
         "line-color": ["concat", "#", ["get", "route_color"]],
         "line-width": state.stopConnectionsLineWidth,
-        "line-opacity": 0.55,
+        "line-opacity": 0.95,
       },
       layout: { visibility: state.showStopConnections ? "visible" : "none" },
     });
@@ -1114,11 +1239,13 @@ function renderRouteList() {
     checkbox.type = "checkbox";
     checkbox.checked = state.visibleRouteIds.has(id);
     checkbox.addEventListener("change", () => {
+      const memberIds = state.groupToRoutes[id] || [id];
       if (checkbox.checked) {
-        state.visibleRouteIds.add(id);
+        memberIds.forEach((memberId) => state.visibleRawRouteIds.add(memberId));
       } else {
-        state.visibleRouteIds.delete(id);
+        memberIds.forEach((memberId) => state.visibleRawRouteIds.delete(memberId));
       }
+      normalizeRouteDatasets();
       updateRouteFilter();
       saveUiState();
     });
@@ -1183,6 +1310,80 @@ function normalizeDisplayText(value) {
   return text;
 }
 
+function timeToMinutes(timeText) {
+  const match = String(timeText || "").trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes) || minutes > 59) return null;
+  return (hours * 60 + minutes) % (24 * 60);
+}
+
+function formatStopTime(timeText) {
+  const text = String(timeText || "").trim();
+  const match = text.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!match) return text;
+  if (state.showStopTimeSeconds && match[3] !== undefined) {
+    return `${match[1].padStart(2, "0")}:${match[2]}:${match[3]}`;
+  }
+  return `${match[1].padStart(2, "0")}:${match[2]}`;
+}
+
+function getCurrentTimeMinutes() {
+  const now = new Date();
+  return now.getHours() * 60 + now.getMinutes();
+}
+
+function circularTimeDistance(firstMinutes, secondMinutes) {
+  const difference = Math.abs(firstMinutes - secondMinutes);
+  return Math.min(difference, 24 * 60 - difference);
+}
+
+function buildStopTimesHtml(times, serviceLabel) {
+  const nearbyTimesScrollThreshold = 12;
+  const normalizedTimes = times
+    .map((time, index) => ({ text: formatStopTime(time), minutes: timeToMinutes(time), index }))
+    .filter((time) => time.text);
+  if (normalizedTimes.length === 0) return "";
+
+  const currentMinutes = getCurrentTimeMinutes();
+  const nearby = normalizedTimes.filter(
+    (time) => time.minutes !== null && circularTimeDistance(time.minutes, currentMinutes) <= 60,
+  );
+  const hasNearbyTimes = nearby.length > 0;
+  const nearbyTimes = nearby.length > 0
+    ? nearby
+    : [...normalizedTimes]
+        .filter((time) => time.minutes !== null)
+        .sort(
+          (first, second) =>
+            circularTimeDistance(first.minutes, currentMinutes) -
+            circularTimeDistance(second.minutes, currentMinutes),
+        )
+        .slice(0, 3);
+  const nearbyIndexes = new Set(nearbyTimes.map((time) => time.index));
+  const otherTimes = normalizedTimes.filter((time) => !nearbyIndexes.has(time.index));
+
+  const nearbyTimesText = nearbyTimes.map((time) => escapeHtml(time.text)).join(", ");
+  const nearbyTimesHtml =
+    nearbyTimes.length > nearbyTimesScrollThreshold
+      ? `<div class="stop-times-nearby-scroll">${nearbyTimesText}</div>`
+      : nearbyTimesText;
+  const timeLabel = hasNearbyTimes
+    ? "現在時刻の前後60分以内の便"
+    : "現在時刻に近い3件";
+  const serviceDayLabel = serviceLabel ? `今日（${escapeHtml(serviceLabel)}）の${timeLabel}` : `今日の${timeLabel}`;
+  const lines = [`${serviceDayLabel}: ${nearbyTimesHtml}`];
+  if (otherTimes.length > 0) {
+    lines.push(
+      `<details class="stop-times-details"><summary>その他の時刻（前後60分以内に該当しない${otherTimes.length}件）</summary><div class="stop-times-list">${otherTimes
+        .map((time) => escapeHtml(time.text))
+        .join(", ")}</div></details>`,
+    );
+  }
+  return lines.join("<br/>");
+}
+
 function buildStopPopupHtml(properties) {
   const stopName = normalizeDisplayText(properties?.stop_name);
   const stopCode = normalizeDisplayText(properties?.stop_code);
@@ -1191,6 +1392,7 @@ function buildStopPopupHtml(properties) {
   const title = stopName || stopCode || `バス停 ${stopId || "不明"}`;
   const routes = Array.isArray(properties?.routes) ? properties.routes.filter(Boolean) : [];
   const times = Array.isArray(properties?.times) ? properties.times.filter(Boolean) : [];
+  const serviceLabel = normalizeDisplayText(properties?.service_label);
   const routeNames = routes.map((routeId) => {
     const routeName = getRouteDisplayName(routeId);
     return state.showStopRouteIds && routeName !== routeId
@@ -1214,7 +1416,9 @@ function buildStopPopupHtml(properties) {
     lines.push(`通過路線: ${routeNames.slice(0, 5).map(escapeHtml).join(", ")}`);
   }
   if (times.length > 0) {
-    lines.push(`時刻(簡易): ${times.slice(0, 5).map(escapeHtml).join(", ")}`);
+    lines.push(buildStopTimesHtml(times, serviceLabel));
+  } else {
+    lines.push(serviceLabel ? `今日（${escapeHtml(serviceLabel)}）の時刻: なし` : "今日の時刻: なし");
   }
   return lines.join("<br/>");
 }
@@ -1238,8 +1442,11 @@ function buildStopPopupText(properties) {
   if (routes.length > 0) {
     lines.push(`通過路線: ${routes.slice(0, 5).join(", ")}`);
   }
+  const serviceLabel = normalizeDisplayText(properties?.service_label);
   if (times.length > 0) {
-    lines.push(`時刻(簡易): ${times.slice(0, 5).join(", ")}`);
+    lines.push(`今日（${serviceLabel || "本日"}）の時刻: ${times.map(formatStopTime).join(", ")}`);
+  } else {
+    lines.push(`今日（${serviceLabel || "本日"}）の時刻: なし`);
   }
   return lines.join("\n");
 }
@@ -1250,7 +1457,7 @@ function resolveStopPropertiesById(stopId, fallbackProperties) {
     return fallbackProperties || {};
   }
 
-  const matchedFeature = (state.stops.features || []).find(
+  const matchedFeature = (state.rawStops.features || []).find(
     (feature) => normalizeDisplayText(feature?.properties?.stop_id) === normalizedStopId,
   );
   return {
@@ -1286,7 +1493,7 @@ async function resolveStopPropertiesWithApiFallback(stopId, fallbackProperties) 
 
 function performStopSearch(query) {
   const normalizedQuery = normalizeDisplayText(query).toLowerCase();
-  return (state.stops.features || [])
+  return (state.rawStops.features || [])
     .filter((feature) => {
       const properties = feature?.properties || {};
       const stopName = normalizeDisplayText(properties.stop_name).toLowerCase();
@@ -1407,9 +1614,10 @@ async function reloadAllData() {
 
   state.rawRoutes = routes;
   state.rawRouteCatalog = routeCatalog;
-  state.stops = stops;
+  state.rawStops = stops;
   state.rawStopConnections = stopConnections;
   state.agencyName = agencyPayload.agency_name || "";
+  state.rawVehicles = vehiclesPayload.vehicles;
   state.vehicles = vehiclesPayload.vehicles;
   focusMapOnVehicles();
 
@@ -1431,10 +1639,17 @@ async function reloadAllData() {
   setGtfsLoadProgress(100, "GTFSデータの読み込みが完了しました。");
 }
 
-function uploadGtfsWithProgress(formData, gtfsId = "default") {
+function uploadGtfsWithProgress(formData, gtfsId = "default", gtfsRtUrl = "", intervalSec = 10) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", `/upload?gtfs_id=${encodeURIComponent(gtfsId)}`);
+    const params = new URLSearchParams({
+      gtfs_id: gtfsId,
+      interval_sec: String(intervalSec),
+    });
+    if (gtfsRtUrl) {
+      params.set("gtfs_rt_url", gtfsRtUrl);
+    }
+    xhr.open("POST", `/upload?${params.toString()}`);
     xhr.responseType = "json";
 
     xhr.upload.onprogress = (event) => {
@@ -1473,6 +1688,8 @@ function uploadGtfsWithProgress(formData, gtfsId = "default") {
 async function uploadGtfs() {
   const input = document.getElementById("gtfsZipInput");
   const gtfsIdInput = document.getElementById("gtfsIdInput");
+  const gtfsRtUrlInput = document.getElementById("gtfsUploadRtUrlInput");
+  const gtfsRtIntervalInput = document.getElementById("gtfsUploadRtIntervalInput");
   const file = input.files?.[0];
   if (!file) {
     if (gtfsUploadResult) gtfsUploadResult.textContent = "ZIPファイルを選択してください。";
@@ -1482,6 +1699,8 @@ async function uploadGtfs() {
   const formData = new FormData();
   formData.append("file", file);
   const gtfsId = gtfsIdInput.value.trim() || "default";
+  const gtfsRtUrl = gtfsRtUrlInput.value.trim();
+  const intervalSec = Number(gtfsRtIntervalInput.value || "10");
 
   try {
     setGtfsLoadProgress(5, "GTFSアップロードを開始しています...");
@@ -1490,7 +1709,7 @@ async function uploadGtfs() {
       gtfsUploadProgressBar.style.width = "5%";
       gtfsUploadProgressText.textContent = "GTFSアップロードを開始しています...";
     }
-    const result = await uploadGtfsWithProgress(formData, gtfsId);
+    const result = await uploadGtfsWithProgress(formData, gtfsId, gtfsRtUrl, intervalSec);
     setGtfsLoadProgress(70, "GTFSをサーバーで読み込み中...");
     if (gtfsUploadResult) {
       gtfsUploadResult.textContent = `${result.message} routes=${result.routes}, stops=${result.stops}`;
@@ -1543,6 +1762,8 @@ async function openDatasetSettings() {
 function openGtfsUpload() {
   document.getElementById("gtfsIdInput").value = "default";
   document.getElementById("gtfsZipInput").value = "";
+  document.getElementById("gtfsUploadRtUrlInput").value = "";
+  document.getElementById("gtfsUploadRtIntervalInput").value = "10";
   if (gtfsUploadResult) gtfsUploadResult.textContent = "";
   gtfsUploadDialog?.showModal();
 }
@@ -1607,6 +1828,81 @@ function wireActions() {
   mergeRoundTripToggle.checked = state.mergeRoundTrip;
   if (showStopRouteIdsToggle) {
     showStopRouteIdsToggle.checked = state.showStopRouteIds;
+  }
+  if (showStopTimeSecondsToggle) {
+    showStopTimeSecondsToggle.checked = state.showStopTimeSeconds;
+    showStopTimeSecondsToggle.addEventListener("change", () => {
+      state.showStopTimeSeconds = showStopTimeSecondsToggle.checked;
+      saveUiState();
+    });
+  }
+  if (showTodayStopConnectionsToggle) {
+    showTodayStopConnectionsToggle.checked = state.showTodayStopConnections;
+    showTodayStopConnectionsToggle.addEventListener("change", () => {
+      state.showTodayStopConnections = showTodayStopConnectionsToggle.checked;
+      normalizeRouteDatasets();
+      refreshOverlayLayers();
+      saveUiState();
+    });
+  }
+  if (showTodayStopsToggle) {
+    showTodayStopsToggle.checked = state.showTodayStops;
+    showTodayStopsToggle.addEventListener("change", () => {
+      state.showTodayStops = showTodayStopsToggle.checked;
+      normalizeRouteDatasets();
+      refreshOverlayLayers();
+      saveUiState();
+    });
+  }
+  const showStopConnectionIdsToggle = document.getElementById("showStopConnectionIdsToggle");
+  if (showStopConnectionIdsToggle) {
+    showStopConnectionIdsToggle.checked = state.showStopConnectionIds;
+    showStopConnectionIdsToggle.addEventListener("change", () => {
+      state.showStopConnectionIds = showStopConnectionIdsToggle.checked;
+      saveUiState();
+    });
+  }
+  if (hideLongStopConnectionsToggle) {
+    hideLongStopConnectionsToggle.checked = state.hideLongStopConnections;
+    hideLongStopConnectionsToggle.addEventListener("change", () => {
+      state.hideLongStopConnections = hideLongStopConnectionsToggle.checked;
+      normalizeRouteDatasets();
+      refreshOverlayLayers();
+      saveUiState();
+    });
+  }
+  if (maxStopSpacingInput) {
+    maxStopSpacingInput.value = String(state.maxStopSpacingKm);
+    maxStopSpacingInput.addEventListener("change", () => {
+      const value = Number(maxStopSpacingInput.value);
+      if (!Number.isFinite(value) || value <= 0) {
+        maxStopSpacingInput.value = String(state.maxStopSpacingKm);
+        return;
+      }
+      state.maxStopSpacingKm = value;
+      normalizeRouteDatasets();
+      refreshOverlayLayers();
+      saveUiState();
+    });
+  }
+  const refreshLongRouteFilters = () => {
+    normalizeRouteDatasets();
+    refreshOverlayLayers();
+    saveUiState();
+  };
+  if (hideLongStopStationsToggle) {
+    hideLongStopStationsToggle.checked = state.hideLongStopStations;
+    hideLongStopStationsToggle.addEventListener("change", () => {
+      state.hideLongStopStations = hideLongStopStationsToggle.checked;
+      refreshLongRouteFilters();
+    });
+  }
+  if (hideLongRouteVehiclesToggle) {
+    hideLongRouteVehiclesToggle.checked = state.hideLongRouteVehicles;
+    hideLongRouteVehiclesToggle.addEventListener("change", () => {
+      state.hideLongRouteVehicles = hideLongRouteVehiclesToggle.checked;
+      refreshLongRouteFilters();
+    });
   }
   const showVehicleIdsToggle = document.getElementById("showVehicleIdsToggle");
   if (showVehicleIdsToggle) {
@@ -1764,10 +2060,13 @@ function wireActions() {
     if (!f) return;
     const p = f.properties || {};
     const routeName = getRouteDisplayName(p.route_id);
+    const identifiers = state.showStopConnectionIds
+      ? `<br/>route_id: ${escapeHtml(p.route_id)}<br/>trip_id: ${escapeHtml(p.trip_id)}`
+      : "";
     new maplibregl.Popup()
       .setLngLat(e.lngLat)
       .setHTML(
-        `<b>停留所連結線</b><br/>路線名: ${escapeHtml(routeName)}<br/>route_id: ${escapeHtml(p.route_id)}<br/>trip_id: ${escapeHtml(p.trip_id)}`,
+        `<b>停留所連結線</b><br/>路線名: ${escapeHtml(routeName)}${identifiers}`,
       )
       .addTo(map);
   });
@@ -1809,7 +2108,8 @@ map.on("load", async () => {
     try {
       const payload = await api("/vehicles");
       const hadVehicles = state.vehicles.features?.length > 0;
-      state.vehicles = payload.vehicles;
+      state.rawVehicles = payload.vehicles;
+      normalizeRouteDatasets();
       map.getSource("vehicles")?.setData(state.vehicles);
       syncVehicleMarkers();
       if (!hadVehicles) focusMapOnVehicles();

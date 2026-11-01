@@ -61,7 +61,7 @@
         <section class="card card-group">
           <h2>⚙️ 表示設定</h2>
           <div class="card-subsection">
-            <h3>往復路線の統合</h3>
+            <h3>停留所連結線</h3>
             <label class="checkbox-row">
               <input id="mergeRoundTripToggle" type="checkbox" />
               <span>統合表示を有効にする</span>
@@ -70,12 +70,56 @@
               <option value="first">統合時カラー: route_idが小さい側</option>
               <option value="second">統合時カラー: route_idが大きい側</option>
             </select>
+            <label class="checkbox-row">
+              <input id="showTodayStopConnectionsToggle" type="checkbox" />
+              <span>今日運行される路線のみ表示する</span>
+            </label>
+            <label class="checkbox-row">
+              <input id="showTodayStopsToggle" type="checkbox" />
+              <span>今日運行される便がない停留所を非表示にする</span>
+            </label>
+            <label class="checkbox-row">
+              <input id="showStopConnectionIdsToggle" type="checkbox" />
+              <span>連結線クリック時にroute_id・trip_idを表示する</span>
+            </label>
+            <label for="stopConnectionsWidthInput">線の太さ</label>
+            <div class="inline-controls width-control-row">
+              <input id="stopConnectionsWidthRange" type="range" min="1" max="20" step="0.05" />
+              <input id="stopConnectionsWidthInput" type="number" min="1" max="20" step="0.05" />
+            </div>
+          </div>
+          <div class="card-subsection">
+            <h3>長距離路線の判定</h3>
+            <label class="long-route-threshold-label" for="maxStopSpacingInput">長距離路線としてみなす最大停留所間隔</label>
+            <div class="inline-controls width-control-row">
+              <input id="maxStopSpacingInput" type="number" min="0.1" max="500" step="0.1" />
+              <span>km超</span>
+            </div>
+          </div>
+          <div class="card-subsection">
+            <h3>長距離路線の表示</h3>
+            <label class="checkbox-row">
+              <input id="hideLongStopConnectionsToggle" type="checkbox" />
+              <span>長距離路線の連結線を非表示にする</span>
+            </label>
+            <label class="checkbox-row">
+              <input id="hideLongStopStationsToggle" type="checkbox" />
+              <span>長距離路線のみ通過する停留所を非表示にする</span>
+            </label>
+            <label class="checkbox-row">
+              <input id="hideLongRouteVehiclesToggle" type="checkbox" />
+              <span>長距離路線の車両を非表示にする</span>
+            </label>
           </div>
           <div class="card-subsection">
             <h3>停留所ポップアップ</h3>
             <label class="checkbox-row">
               <input id="showStopRouteIdsToggle" type="checkbox" />
               <span>路線・停留所のIDを表示する</span>
+            </label>
+            <label class="checkbox-row">
+              <input id="showStopTimeSecondsToggle" type="checkbox" />
+              <span>時刻表示に秒数を表示する</span>
             </label>
           </div>
           <div class="card-subsection">
@@ -88,14 +132,6 @@
               <input id="showVehicleBearingToggle" type="checkbox" />
               <span>方位を表示する</span>
             </label>
-          </div>
-          <div class="card-subsection">
-            <h3>停留所連結線</h3>
-            <label for="stopConnectionsWidthInput">線の太さ</label>
-            <div class="inline-controls width-control-row">
-              <input id="stopConnectionsWidthRange" type="range" min="1" max="20" step="0.05" />
-              <input id="stopConnectionsWidthInput" type="number" min="1" max="20" step="0.05" />
-            </div>
           </div>
         </section>
 
@@ -184,6 +220,17 @@
             <input type="file" id="gtfsZipInput" accept=".zip" />
             <p class="hint">アップロード後、このGTFSが使用対象になります。</p>
           </section>
+          <section class="settings-section">
+            <h3>GTFS-RT車両情報（任意）</h3>
+            <label for="gtfsUploadRtUrlInput">Vehicle Positions URL</label>
+            <input id="gtfsUploadRtUrlInput" type="url" placeholder="未設定でも保存できます" />
+            <label for="gtfsUploadRtIntervalInput">更新間隔</label>
+            <div class="inline-controls rt-interval-row">
+              <input id="gtfsUploadRtIntervalInput" type="number" min="5" max="60" value="10" />
+              <span>秒</span>
+            </div>
+            <p class="hint">URLを空欄にするとGTFS-RTを停止した状態で保存します。</p>
+          </section>
           <p id="gtfsUploadResult" class="hint" role="status"></p>
           <div id="gtfsUploadProgressWrap" class="load-progress is-hidden" aria-live="polite">
             <div class="load-progress-bar"><div id="gtfsUploadProgressBar"></div></div>
@@ -192,13 +239,13 @@
         </div>
         <div class="settings-dialog-actions">
           <button id="cancelGtfsUploadBtn" class="secondary-button" type="button">戻る</button>
-          <button id="uploadGtfsBtn" type="button">アップロード</button>
+          <button id="uploadGtfsBtn" type="button">アップロードして保存</button>
         </div>
       </form>
     </dialog>
 
     <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
     <script src="/static/performance-monitor.js?v=20260502f"></script>
-    <script src="/static/app.js?v=20261018u"></script>
+    <script src="/static/app.js?v=20261101-long-route-filter-v2"></script>
   </body>
 </html>
