@@ -109,9 +109,9 @@ uvicorn app.main:app --reload --port 8001
 
 `shapes.txt` がない、または路線形状を生成できない場合は、`stop_times.txt` と停留所位置から停留所連結線を生成して路線表示に利用します。
 
-### 複数GTFSを切り替える
+### 複数GTFSを表示する
 
-アップロード画面で `GTFS ID` を指定すると、複数のGTFSを登録できます。画面のGTFS選択欄から登録済みデータを切り替えます。
+アップロード画面で `GTFS ID` を指定すると、複数のGTFSを登録できます。GTFS選択欄で複数項目を選択すると、路線・停留所・停留所連結線を同時に表示します。GTFS-RT URLを設定したデータは、それぞれのフィードから車両を取得し、登録した車両マーカー色で表示します。
 
 ```powershell
 curl.exe -F "file=@sample.zip" "http://127.0.0.1:8000/upload?gtfs_id=sample"
@@ -124,6 +124,7 @@ curl.exe -F "file=@sample.zip" "http://127.0.0.1:8000/upload?gtfs_id=sample"
 ### GTFS-RTを設定する
 
 1. 「GTFS-RT設定」のURLに Vehicle Positions の protobuf エンドポイントを入力します。
+2. GTFSごとに「車両マーカー色」を設定できます。新規アップロード時にも指定できます。
 2. 更新間隔を5～60秒で指定します。
 3. 「RT設定を保存」を押します。
 4. RT再接続が必要な場合は「RT再接続」を押します。
@@ -154,16 +155,16 @@ GET /health
 
 ```http
 POST /upload?gtfs_id=default&gtfs_rt_url=https%3A%2F%2Fexample.com%2FvehiclePositions.pb&interval_sec=10
-POST /upload_gtfs?gtfs_id=default
 GET  /gtfs_list
-POST /gtfs/select?gtfs_id=default
+POST /gtfs/active
+DELETE /gtfs/delete?gtfs_id=default
 GET  /routes
 GET  /route_catalog
 GET  /stops
 GET  /stop_connections
 ```
 
-`gtfs_rt_url` は任意です。省略または空欄の場合はGTFS-RTを停止した状態でGTFSを登録します。`interval_sec` は5～60秒です。
+`gtfs_rt_url` は任意です。省略または空欄の場合はGTFS-RTを停止した状態でGTFSを登録します。`interval_sec` は5～60秒です。`/gtfs/active` には表示するGTFS IDの配列を指定します。
 
 アップロードAPIのレスポンスには、`gtfs_id`、路線数、停留所数、停留所連結線数が含まれます。
 

@@ -465,6 +465,7 @@ function syncVehicleMarkers() {
       } else {
         marker.setLngLat({ lng: longitude, lat: latitude });
       }
+      marker.getElement().style.backgroundColor = properties.vehicle_color || "#e4572e";
       marker.getElement()._vehicleCoordinates = [longitude, latitude];
       marker.getElement()._vehicleProperties = properties;
       marker.getElement().hidden = !state.showVehicles;
@@ -1564,12 +1565,12 @@ async function refreshGtfsList() {
       const option = document.createElement("option");
       option.value = item.gtfs_id;
       option.textContent = `${item.gtfs_id} (路線: ${item.route_count}, 停留所: ${item.stop_count})`;
-      option.selected = item.is_current;
+      option.selected = item.is_active;
       gtfsSelect.appendChild(option);
     });
 
     if (gtfsList.length > 0) {
-      const current = gtfsList.find((item) => item.is_current);
+      const current = gtfsList.find((item) => item.is_active);
       if (current) {
         gtfsSelectResult.textContent = `現在: ${current.gtfs_id} (路線: ${current.route_count}, 停留所: ${current.stop_count})`;
       }
@@ -1577,25 +1578,6 @@ async function refreshGtfsList() {
   } catch (err) {
     console.warn("GTFS一覧の取得に失敗しました", err);
     gtfsSelectResult.textContent = `読み込みエラー: ${err.message}`;
-  }
-}
-
-async function selectGtfs(gtfsId) {
-  try {
-    gtfsSelectResult.textContent = "切り替え中...";
-    const response = await api(`/gtfs/select?gtfs_id=${encodeURIComponent(gtfsId)}`, {
-      method: "POST",
-    });
-
-    const rtConfig = response.rt_config || {};
-    document.getElementById("rtUrlInput").value = rtConfig.gtfs_rt_url || "";
-    document.getElementById("rtIntervalInput").value = rtConfig.interval_sec || 10;
-    if (response.status) renderRtStatus(response.status);
-    gtfsSelectResult.textContent = `✓ 切り替え完了: ${gtfsId}`;
-    await reloadAllData();
-  } catch (err) {
-    gtfsSelectResult.textContent = `✗ 切り替え失敗: ${err.message}`;
-    console.error("GTFS選択に失敗しました", err);
   }
 }
 
@@ -1635,16 +1617,18 @@ async function reloadAllData() {
   renderStopSearchResults(performStopSearch(stopSearchInput?.value || ""));
   applyDisplaySettings();
   updateDebugOverlay();
-  renderRtStatus(vehiclesPayload.status);
+  const statuses = Object.values(vehiclesPayload.status || {});
+  renderRtStatus(statuses[0] || vehiclesPayload.status);
   setGtfsLoadProgress(100, "GTFSデータの読み込みが完了しました。");
 }
 
-function uploadGtfsWithProgress(formData, gtfsId = "default", gtfsRtUrl = "", intervalSec = 10) {
+function uploadGtfsWithProgress(formData, gtfsId = "default", gtfsRtUrl = "", intervalSec = 10, vehicleColor = "#e4572e") {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const params = new URLSearchParams({
       gtfs_id: gtfsId,
       interval_sec: String(intervalSec),
+      vehicle_color: vehicleColor,
     });
     if (gtfsRtUrl) {
       params.set("gtfs_rt_url", gtfsRtUrl);
@@ -1690,6 +1674,7 @@ async function uploadGtfs() {
   const gtfsIdInput = document.getElementById("gtfsIdInput");
   const gtfsRtUrlInput = document.getElementById("gtfsUploadRtUrlInput");
   const gtfsRtIntervalInput = document.getElementById("gtfsUploadRtIntervalInput");
+  const gtfsUploadVehicleColorInput = document.getElementById("gtfsUploadVehicleColorInput");
   const file = input.files?.[0];
   if (!file) {
     if (gtfsUploadResult) gtfsUploadResult.textContent = "ZIPファイルを選択してください。";
@@ -1709,14 +1694,18 @@ async function uploadGtfs() {
       gtfsUploadProgressBar.style.width = "5%";
       gtfsUploadProgressText.textContent = "GTFSアップロードを開始しています...";
     }
-    const result = await uploadGtfsWithProgress(formData, gtfsId, gtfsRtUrl, intervalSec);
+    const result = await uploadGtfsWithProgress(formData, gtfsId, gtfsRtUrl, intervalSec, gtfsUploadVehicleColorInput.value);
     setGtfsLoadProgress(70, "GTFSをサーバーで読み込み中...");
     if (gtfsUploadResult) {
       gtfsUploadResult.textContent = `${result.message} routes=${result.routes}, stops=${result.stops}`;
     }
     await reloadAllData();
     await refreshGtfsList();
-    if (gtfsSelect) gtfsSelect.value = gtfsId;
+    if (gtfsSelect) {
+      Array.from(gtfsSelect.options).forEach((option) => {
+        option.selected = option.value === gtfsId;
+      });
+    }
     return result;
   } catch (err) {
     if (gtfsUploadResult) gtfsUploadResult.textContent = `失敗: ${err.message}`;
@@ -1729,6 +1718,7 @@ async function saveDatasetSettings() {
   const selectedGtfs = document.getElementById("gtfsSelect").value;
   const url = document.getElementById("rtUrlInput").value.trim();
   const interval = Number(document.getElementById("rtIntervalInput").value || "10");
+  const vehicleColor = document.getElementById("rtVehicleColorInput").value;
 
   try {
     if (datasetSettingsResult) datasetSettingsResult.textContent = "設定を保存しています...";
@@ -1737,7 +1727,7 @@ async function saveDatasetSettings() {
     const result = await api("/settings/dataset", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ gtfs_id: gtfsId, gtfs_rt_url: url || null, interval_sec: interval }),
+      body: JSON.stringify({ gtfs_id: gtfsId, gtfs_rt_url: url || null, interval_sec: interval, vehicle_color: vehicleColor }),
     });
     renderRtStatus(result.status);
     await refreshGtfsList();
@@ -1751,10 +1741,13 @@ async function saveDatasetSettings() {
 }
 
 async function openDatasetSettings() {
-  await refreshGtfsList();
-  const status = await api("/vehicles");
-  document.getElementById("rtUrlInput").value = status.status?.url || "";
-  document.getElementById("rtIntervalInput").value = status.status?.interval_sec || 10;
+  const response = await api("/gtfs_list");
+  const selectedIds = Array.from(gtfsSelect?.selectedOptions || []).map((option) => option.value);
+  const selected = (response.gtfs_list || []).find((item) => item.gtfs_id === selectedIds[0])
+    || (response.gtfs_list || []).find((item) => item.is_active);
+  document.getElementById("rtUrlInput").value = selected?.gtfs_rt_url || "";
+  document.getElementById("rtIntervalInput").value = selected?.interval_sec || 10;
+  document.getElementById("rtVehicleColorInput").value = selected?.vehicle_color || "#e4572e";
   if (datasetSettingsResult) datasetSettingsResult.textContent = "";
   datasetSettingsDialog?.showModal();
 }
@@ -1764,6 +1757,7 @@ function openGtfsUpload() {
   document.getElementById("gtfsZipInput").value = "";
   document.getElementById("gtfsUploadRtUrlInput").value = "";
   document.getElementById("gtfsUploadRtIntervalInput").value = "10";
+  document.getElementById("gtfsUploadVehicleColorInput").value = "#e4572e";
   if (gtfsUploadResult) gtfsUploadResult.textContent = "";
   gtfsUploadDialog?.showModal();
 }
@@ -1812,7 +1806,15 @@ function wireActions() {
 
   if (gtfsSelect) {
     gtfsSelect.addEventListener("change", async (event) => {
-      await selectGtfs(event.target.value);
+      const selectedIds = Array.from(event.target.selectedOptions).map((option) => option.value);
+      if (!selectedIds.length) return;
+      await api("/gtfs/active", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gtfs_ids: selectedIds }),
+      });
+      await refreshGtfsList();
+      await reloadAllData();
     });
   }
 

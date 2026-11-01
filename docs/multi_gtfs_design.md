@@ -30,13 +30,13 @@ _current_gtfs_id: str  # 現在表示中のGTFS ID
 
 #### API の拡張
 ```
-GET /routes?gtfs_id=xxx
-GET /stops?gtfs_id=xxx
-GET /stop_connections?gtfs_id=xxx
-GET /route_catalog?gtfs_id=xxx
+GET /routes
+GET /stops
+GET /stop_connections
+GET /route_catalog
 
 GET /gtfs_list  # 登録済み GTFS 一覧
-POST /gtfs/select?id=xxx  # 表示する GTFS を切り替え
+POST /gtfs/active         # 同時表示する GTFS ID を設定
 ```
 
 ### 実装フェーズ
@@ -44,12 +44,12 @@ POST /gtfs/select?id=xxx  # 表示する GTFS を切り替え
 #### Phase 1：バックエンド基盤（優先度：高）
 - [x] `DataStore` を複数 GTFS 対応に拡張
 - [x] `/gtfs_list` エンドポイント追加
-- [x] `/gtfs/select` エンドポイント追加
+- [x] `/gtfs/active` エンドポイント追加
 - [ ] DB スキーマに `gtfs_id` カラムを追加
 
 #### Phase 2：フロントエンド UI（優先度：中）
-- [x] 左パネルに GTFS 選択ドロップダウン追加
-- [x] 選択時に `POST /gtfs/select` を呼び出し
+- [x] 左パネルに GTFS 複数選択UI追加
+- [x] 選択時に `POST /gtfs/active` を呼び出し
 - [x] マップを再読み込み
 - [x] route_catalog を更新
 
@@ -65,8 +65,8 @@ POST /gtfs/select?id=xxx  # 表示する GTFS を切り替え
 - 大規模 GTFS × 複数個でメモリ圧迫の可能性
 - 将来的には DB キャッシュ層の導入を検討
 
-### 2. API の互換性
-- 既存 API を破壊しないようにデフォルト値を用意
+### 2. API 方針
+- 旧単一GTFS APIとの互換性は維持せず、アクティブGTFS集合を返すAPIを正規のインターフェースとする
   - `gtfs_id` が指定されない場合 → 最後にアップロードされた GTFS を使用
 
 ### 3. アップロード時の挙動
@@ -105,7 +105,7 @@ def list_gtfs(self) -> list[dict]:
 def gtfs_list() -> dict:
     return store.list_gtfs()
 
-@app.post("/gtfs/select")
+@app.post("/gtfs/active")
 def gtfs_select(gtfs_id: str) -> dict:
     if store.select_gtfs(gtfs_id):
         return {"message": f"GTFS {gtfs_id} を選択しました"}
@@ -115,7 +115,7 @@ def gtfs_select(gtfs_id: str) -> dict:
 
 ### Step 4: フロントエンド UI
 - 左パネルの上部に GTFS 選択ドロップダウンを追加
-- 選択時に `/gtfs/select` を POST
+- 選択時に `/gtfs/active` を POST
 - 成功時にマップを再読み込み
 
 ## リスクと対策
@@ -123,10 +123,10 @@ def gtfs_select(gtfs_id: str) -> dict:
 | リスク | 対策 |
 |--------|------|
 | メモリ枯渇 | 大規模 GTFS × 多数個の場合は今後改善、ひとまず複数保持に限定 |
-| API の互換性 | デフォルト値を用意、既存 API はそのまま動作 |
+| API 方針 | 複数GTFSを前提としたAPIを使用し、旧単一GTFS APIは提供しない |
 | DB 容量 | アップロード制限は別途検討 |
 | UI の複雑さ増加 | ドロップダウン 1 つに限定 |
 
 ## まとめ
 
-最小実装では Phase 1 のみを先行し、UI は Phase 2 で段階的に実装。API の互換性を保ちながら、複数 GTFS 同時保持を実現。
+複数GTFSのアクティブ集合を保存し、統合GeoJSONとGTFS-RT車両を同時に返す。

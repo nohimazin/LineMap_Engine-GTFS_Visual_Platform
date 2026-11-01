@@ -170,7 +170,7 @@
           <section class="settings-section">
             <h3>GTFSデータ</h3>
             <label for="gtfsSelect">使用するGTFS</label>
-            <select id="gtfsSelect">
+            <select id="gtfsSelect" multiple size="4">
               <option value="default">デフォルト</option>
             </select>
             <button id="deleteGtfsBtn" class="danger-button" type="button">選択中のGTFSを削除</button>
@@ -186,6 +186,8 @@
               <input id="rtIntervalInput" type="number" min="5" max="60" value="10" />
               <span>秒</span>
             </div>
+            <label for="rtVehicleColorInput">車両マーカー色</label>
+            <input id="rtVehicleColorInput" type="color" value="#e4572e" />
             <p class="hint">空欄で保存するとGTFS-RTを停止します。</p>
           </section>
           <p id="datasetSettingsResult" class="hint" role="status"></p>
@@ -229,6 +231,8 @@
               <input id="gtfsUploadRtIntervalInput" type="number" min="5" max="60" value="10" />
               <span>秒</span>
             </div>
+            <label for="gtfsUploadVehicleColorInput">車両マーカー色</label>
+            <input id="gtfsUploadVehicleColorInput" type="color" value="#e4572e" />
             <p class="hint">URLを空欄にするとGTFS-RTを停止した状態で保存します。</p>
           </section>
           <p id="gtfsUploadResult" class="hint" role="status"></p>
