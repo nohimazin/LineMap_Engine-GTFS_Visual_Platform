@@ -91,6 +91,8 @@ const routeList = document.getElementById("routeList");
 const routeSearchInput = document.getElementById("routeSearchInput");
 const stopSearchInput = document.getElementById("stopSearchInput");
 const stopSearchList = document.getElementById("stopSearchList");
+const vehicleSearchInput = document.getElementById("vehicleSearchInput");
+const vehicleSearchList = document.getElementById("vehicleSearchList");
 const datasetSettingsResult = document.getElementById("datasetSettingsResult");
 const gtfsLoadProgressWrap = document.getElementById("gtfsLoadProgressWrap");
 const gtfsLoadProgressBar = document.getElementById("gtfsLoadProgressBar");
@@ -125,6 +127,8 @@ const saveDatasetSettingsBtn = document.getElementById("saveDatasetSettingsBtn")
 const backToGtfsListBtn = document.getElementById("backToGtfsListBtn");
 const gtfsDetailSection = document.getElementById("gtfsDetailSection");
 const gtfsDetailTitle = document.getElementById("gtfsDetailTitle");
+const openGtfsOverwriteBtn = document.getElementById("openGtfsOverwriteBtn");
+let gtfsDetailRequestToken = 0;
 const gtfsListSection = document.getElementById("gtfsListSection");
 const deleteGtfsBtn = document.getElementById("deleteGtfsBtn");
 const gtfsUploadDialog = document.getElementById("gtfsUploadDialog");
@@ -139,6 +143,7 @@ const gtfsUploadProgressText = document.getElementById("gtfsUploadProgressText")
 let debugOverlay = null;
 const vehicleMarkers = new Map();
 const debugEnabled = new URLSearchParams(window.location.search).get("debug") === "1";
+let loadedServiceDate = new Date().toDateString();
 
 if (appVersion) {
   appVersion.textContent = `Version: ${UI_BUILD_VERSION}`;
@@ -391,29 +396,43 @@ function syncSourcesData() {
   syncVehicleMarkers();
 }
 
+function getVehicleDisplayColor(value) {
+  const color = normalizeDisplayText(value);
+  return /^#[0-9a-f]{6}$/i.test(color) ? color : "#e4572e";
+}
+
 function buildVehiclePopupHtml(properties = {}) {
   const vehicleId = normalizeDisplayText(properties.vehicle_id) || "不明";
   const vehicleLabel = normalizeDisplayText(properties.vehicle_label) || vehicleId;
   const tripId = normalizeDisplayText(properties.trip_id) || "不明";
   const routeId = normalizeDisplayText(properties.route_id);
   const routeName = getRouteDisplayLabel(routeId) || "不明";
+  const agencyName = normalizeDisplayText(properties.vehicle_agency_name);
+  const vehicleColor = getVehicleDisplayColor(properties.vehicle_color);
   const bearingValue = Number(properties.bearing);
   const speedValue = Number(properties.speed);
   const bearing = Number.isFinite(bearingValue) ? `${bearingValue.toFixed(1)}°` : "不明";
   const speed = Number.isFinite(speedValue) ? `${(speedValue * 3.6).toFixed(1)} km/h` : "不明";
+  const hasDelay = properties.delay_seconds !== null && properties.delay_seconds !== undefined;
+  const delaySeconds = Number(properties.delay_seconds);
+  const delay = hasDelay && Number.isFinite(delaySeconds)
+    ? `${delaySeconds < 0 ? "-" : ""}${Math.abs(Math.round(delaySeconds / 60))}分${delaySeconds < 0 ? "早着" : "遅延"}`
+    : "遅延情報なし";
   const timestampValue = Number(properties.timestamp);
   const timestamp = Number.isFinite(timestampValue) && timestampValue > 0
     ? new Date(timestampValue * 1000).toLocaleString("ja-JP", { hour12: false })
     : "不明";
-  const searchText = `${state.agencyName} ${vehicleLabel}`.trim();
-  const vehicleNumber = state.agencyName && vehicleLabel !== "不明"
+  const searchText = `${agencyName} ${vehicleLabel}`.trim();
+  const vehicleNumber = agencyName && vehicleLabel !== "不明"
     ? `<a href="https://www.google.com/search?q=${encodeURIComponent(searchText)}" target="_blank" rel="noopener noreferrer">車両番号: ${escapeHtml(vehicleLabel)}</a>`
     : `車両番号: ${escapeHtml(vehicleLabel)}`;
 
   const lines = [
     "車両情報",
     vehicleNumber,
+    `<span style="color: ${escapeHtml(vehicleColor)}">事業者: ${escapeHtml(agencyName || "不明")}</span>`,
     `路線: ${escapeHtml(routeName)}`,
+    `遅延: ${escapeHtml(delay)}`,
     `速度: ${escapeHtml(speed)}`,
     `更新時刻: ${escapeHtml(timestamp)}`,
   ];
@@ -431,6 +450,66 @@ function showVehiclePopup(coordinates, properties) {
     .setLngLat(coordinates)
     .setHTML(buildVehiclePopupHtml(properties))
     .addTo(map);
+}
+
+function getVehicleSearchLabel(feature) {
+  const properties = feature?.properties || {};
+  const vehicleLabel = normalizeDisplayText(properties.vehicle_label);
+  const vehicleId = normalizeDisplayText(properties.vehicle_id);
+  const routeId = normalizeDisplayText(properties.route_id);
+  const vehicleName = vehicleLabel || vehicleId || "車両番号不明";
+  const route = findRouteCatalogEntry(routeId);
+  const routeName = normalizeDisplayText(route?.route_long_name) || getRouteDisplayLabel(routeId);
+  const agencyName = normalizeDisplayText(properties.vehicle_agency_name);
+  const routeText = routeName && routeName !== routeId ? `(${routeName})` : "";
+  const agencyText = agencyName ? `(${agencyName})` : "";
+  return `${vehicleName}${routeText}${agencyText}`;
+}
+
+function performVehicleSearch(query) {
+  const normalizedQuery = normalizeDisplayText(query).toLowerCase();
+  return (state.vehicles.features || [])
+    .filter((feature) => {
+      const properties = feature?.properties || {};
+      const routeId = normalizeDisplayText(properties.route_id);
+      const searchableText = [
+        properties.vehicle_id,
+        properties.vehicle_label,
+        properties.trip_id,
+        routeId,
+        getRouteDisplayLabel(routeId),
+      ]
+        .map((value) => normalizeDisplayText(value).toLowerCase())
+        .join(" ");
+      return !normalizedQuery || searchableText.includes(normalizedQuery);
+    })
+    .slice(0, 50);
+}
+
+function renderVehicleSearchResults(results) {
+  if (!vehicleSearchList) return;
+  vehicleSearchList.innerHTML = "";
+  if (results.length === 0) {
+    const noResults = document.createElement("div");
+    noResults.className = "hint";
+    noResults.style.padding = "6px 8px";
+    noResults.textContent = state.vehicles.features?.length ? "検索結果なし" : "走行中の車両なし";
+    vehicleSearchList.appendChild(noResults);
+    return;
+  }
+
+  results.forEach((feature) => {
+    const item = document.createElement("div");
+    item.className = "stop-search-item";
+    item.textContent = getVehicleSearchLabel(feature);
+    item.addEventListener("click", () => {
+      const coordinates = feature?.geometry?.coordinates;
+      if (!Array.isArray(coordinates) || coordinates.length < 2) return;
+      map.easeTo({ center: coordinates, zoom: Math.max(map.getZoom(), 15), duration: 800 });
+      showVehiclePopup(coordinates, feature.properties || {});
+    });
+    vehicleSearchList.appendChild(item);
+  });
 }
 
 function syncVehicleMarkers() {
@@ -1715,13 +1794,15 @@ async function reloadAllData() {
   refreshOverlayLayers();
   renderRouteList();
   renderStopSearchResults(performStopSearch(stopSearchInput?.value || ""));
+  renderVehicleSearchResults(performVehicleSearch(vehicleSearchInput?.value || ""));
   applyDisplaySettings();
   updateDebugOverlay();
   renderRtStatus(vehiclesPayload.status);
   setGtfsLoadProgress(100, "GTFSデータの読み込みが完了しました。");
+  loadedServiceDate = new Date().toDateString();
 }
 
-function uploadGtfsWithProgress(formData, gtfsId = "default", gtfsRtUrl = "", intervalSec = 10, vehicleColor = "#e4572e") {
+function uploadGtfsWithProgress(formData, gtfsId = "default", gtfsRtUrl = "", intervalSec = 10, vehicleColor = "#e4572e", tripUpdateUrl = "") {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const params = new URLSearchParams({
@@ -1731,6 +1812,9 @@ function uploadGtfsWithProgress(formData, gtfsId = "default", gtfsRtUrl = "", in
     });
     if (gtfsRtUrl) {
       params.set("gtfs_rt_url", gtfsRtUrl);
+    }
+    if (tripUpdateUrl) {
+      params.set("gtfs_trip_update_url", tripUpdateUrl);
     }
     xhr.open("POST", `/upload?${params.toString()}`);
     xhr.responseType = "json";
@@ -1772,6 +1856,7 @@ async function uploadGtfs() {
   const input = document.getElementById("gtfsZipInput");
   const gtfsIdInput = document.getElementById("gtfsIdInput");
   const gtfsRtUrlInput = document.getElementById("gtfsUploadRtUrlInput");
+  const gtfsTripUpdateUrlInput = document.getElementById("gtfsUploadTripUpdateUrlInput");
   const gtfsRtIntervalInput = document.getElementById("gtfsUploadRtIntervalInput");
   const gtfsUploadVehicleColorInput = document.getElementById("gtfsUploadVehicleColorInput");
   const file = input.files?.[0];
@@ -1784,6 +1869,7 @@ async function uploadGtfs() {
   formData.append("file", file);
   const gtfsId = gtfsIdInput.value.trim() || "default";
   const gtfsRtUrl = gtfsRtUrlInput.value.trim();
+  const tripUpdateUrl = gtfsTripUpdateUrlInput.value.trim();
   const intervalSec = Number(gtfsRtIntervalInput.value || "10");
 
   try {
@@ -1793,7 +1879,7 @@ async function uploadGtfs() {
       gtfsUploadProgressBar.style.width = "5%";
       gtfsUploadProgressText.textContent = "GTFSアップロードを開始しています...";
     }
-    const result = await uploadGtfsWithProgress(formData, gtfsId, gtfsRtUrl, intervalSec, gtfsUploadVehicleColorInput.value);
+    const result = await uploadGtfsWithProgress(formData, gtfsId, gtfsRtUrl, intervalSec, gtfsUploadVehicleColorInput.value, tripUpdateUrl);
     setGtfsLoadProgress(70, "GTFSをサーバーで読み込み中...");
     if (gtfsUploadResult) {
       gtfsUploadResult.textContent = `${result.message} routes=${result.routes}, stops=${result.stops}`;
@@ -1810,22 +1896,28 @@ async function uploadGtfs() {
 }
 
 async function saveDatasetSettings() {
-  const selectedGtfs = getSelectedGtfsIds()[0];
+  const gtfsId = gtfsDetailTitle?.dataset.gtfsId;
   const url = document.getElementById("rtUrlInput").value.trim();
+  const tripUpdateUrl = document.getElementById("tripUpdateUrlInput").value.trim();
   const interval = Number(document.getElementById("rtIntervalInput").value || "10");
   const vehicleColor = document.getElementById("rtVehicleColorInput").value;
 
   try {
     if (datasetSettingsResult) datasetSettingsResult.textContent = "設定を保存しています...";
-    if (!selectedGtfs) {
-      throw new Error("設定するGTFSを1つ選択してください。");
+    if (!gtfsId) {
+      throw new Error("設定対象のGTFSを選択してください。");
     }
-    const gtfsId = selectedGtfs;
 
     const result = await api("/settings/dataset", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ gtfs_id: gtfsId, gtfs_rt_url: url || null, interval_sec: interval, vehicle_color: vehicleColor }),
+      body: JSON.stringify({
+        gtfs_id: gtfsId,
+        gtfs_rt_url: url || null,
+        gtfs_trip_update_url: tripUpdateUrl || null,
+        interval_sec: interval,
+        vehicle_color: vehicleColor,
+      }),
     });
     renderRtStatus(result.status);
     await refreshGtfsList();
@@ -1845,6 +1937,7 @@ async function openDatasetSettings() {
 }
 
 function showGtfsListView() {
+  gtfsDetailRequestToken += 1;
   gtfsListSection?.classList.remove("is-hidden");
   gtfsDetailSection?.classList.add("is-hidden");
   saveDatasetSettingsBtn?.classList.add("is-hidden");
@@ -1856,7 +1949,11 @@ async function openGtfsDetailView(gtfsId = getSelectedGtfsIds()[0]) {
     if (datasetSettingsResult) datasetSettingsResult.textContent = "設定するGTFSを選択してください。";
     return;
   }
+  const requestToken = ++gtfsDetailRequestToken;
   const response = await api("/gtfs_list");
+  if (requestToken !== gtfsDetailRequestToken) {
+    return;
+  }
   const selected = (response.gtfs_list || []).find((item) => item.gtfs_id === gtfsId);
   if (!selected) {
     throw new Error(`GTFS「${gtfsId}」が見つかりません。`);
@@ -1864,6 +1961,7 @@ async function openGtfsDetailView(gtfsId = getSelectedGtfsIds()[0]) {
   gtfsDetailTitle.textContent = `GTFS個別設定: ${selected.gtfs_id}`;
   gtfsDetailTitle.dataset.gtfsId = selected.gtfs_id;
   document.getElementById("rtUrlInput").value = selected.gtfs_rt_url || "";
+  document.getElementById("tripUpdateUrlInput").value = selected.gtfs_trip_update_url || "";
   document.getElementById("rtIntervalInput").value = selected.interval_sec || 10;
   document.getElementById("rtVehicleColorInput").value = selected.vehicle_color || "#e4572e";
   gtfsListSection?.classList.add("is-hidden");
@@ -1872,13 +1970,34 @@ async function openGtfsDetailView(gtfsId = getSelectedGtfsIds()[0]) {
   if (datasetSettingsResult) datasetSettingsResult.textContent = `設定対象: ${selected.gtfs_id}`;
 }
 
-function openGtfsUpload() {
-  document.getElementById("gtfsIdInput").value = "default";
+function openGtfsUpload(targetGtfsId = null) {
+  const gtfsIdInput = document.getElementById("gtfsIdInput");
+  const uploadDialogTitle = gtfsUploadDialog?.querySelector(".settings-dialog-header h2");
+  const gtfsIdLabel = document.querySelector('label[for="gtfsIdInput"]');
+  gtfsIdInput.value = targetGtfsId || "default";
+  gtfsIdInput.readOnly = Boolean(targetGtfsId);
+  if (uploadDialogTitle) {
+    uploadDialogTitle.textContent = targetGtfsId ? "GTFSを上書きアップロード" : "新規GTFSをアップロード";
+  }
+  if (gtfsIdLabel) {
+    gtfsIdLabel.textContent = targetGtfsId ? "上書き対象のGTFS ID" : "保存するGTFS ID";
+  }
   document.getElementById("gtfsZipInput").value = "";
-  document.getElementById("gtfsUploadRtUrlInput").value = "";
-  document.getElementById("gtfsUploadRtIntervalInput").value = "10";
-  document.getElementById("gtfsUploadVehicleColorInput").value = "#e4572e";
+  if (targetGtfsId) {
+    document.getElementById("gtfsUploadRtUrlInput").value = document.getElementById("rtUrlInput").value;
+    document.getElementById("gtfsUploadTripUpdateUrlInput").value = document.getElementById("tripUpdateUrlInput").value;
+    document.getElementById("gtfsUploadRtIntervalInput").value = document.getElementById("rtIntervalInput").value;
+    document.getElementById("gtfsUploadVehicleColorInput").value = document.getElementById("rtVehicleColorInput").value;
+  } else {
+    document.getElementById("gtfsUploadRtUrlInput").value = "";
+    document.getElementById("gtfsUploadTripUpdateUrlInput").value = "";
+    document.getElementById("gtfsUploadRtIntervalInput").value = "10";
+    document.getElementById("gtfsUploadVehicleColorInput").value = "#e4572e";
+  }
   if (gtfsUploadResult) gtfsUploadResult.textContent = "";
+  if (gtfsUploadProgressWrap) gtfsUploadProgressWrap.classList.add("is-hidden");
+  if (gtfsUploadProgressBar) gtfsUploadProgressBar.style.width = "0%";
+  if (gtfsUploadProgressText) gtfsUploadProgressText.textContent = "";
   gtfsUploadDialog?.showModal();
 }
 
@@ -1913,6 +2032,10 @@ function wireActions() {
   saveDatasetSettingsBtn?.addEventListener("click", saveDatasetSettings);
   deleteGtfsBtn?.addEventListener("click", deleteSelectedGtfs);
   openGtfsUploadBtn?.addEventListener("click", openGtfsUpload);
+  openGtfsOverwriteBtn?.addEventListener("click", () => {
+    const gtfsId = gtfsDetailTitle?.dataset.gtfsId;
+    if (gtfsId) openGtfsUpload(gtfsId);
+  });
   closeGtfsUploadBtn?.addEventListener("click", () => gtfsUploadDialog?.close());
   cancelGtfsUploadBtn?.addEventListener("click", () => gtfsUploadDialog?.close());
   uploadGtfsBtn?.addEventListener("click", async () => {
@@ -1931,6 +2054,11 @@ function wireActions() {
       const query = event.target.value;
       const results = performStopSearch(query);
       renderStopSearchResults(results);
+    });
+  }
+  if (vehicleSearchInput) {
+    vehicleSearchInput.addEventListener("input", (event) => {
+      renderVehicleSearchResults(performVehicleSearch(event.target.value));
     });
   }
 
@@ -2230,12 +2358,17 @@ map.on("load", async () => {
     if (isPollingVehicles) return;
     isPollingVehicles = true;
     try {
+      if (loadedServiceDate !== new Date().toDateString()) {
+        await reloadAllData();
+        return;
+      }
       const payload = await api("/vehicles");
       const hadVehicles = state.vehicles.features?.length > 0;
       state.rawVehicles = payload.vehicles;
       normalizeRouteDatasets();
       map.getSource("vehicles")?.setData(state.vehicles);
       syncVehicleMarkers();
+      renderVehicleSearchResults(performVehicleSearch(vehicleSearchInput?.value || ""));
       if (!hadVehicles) focusMapOnVehicles();
       renderRtStatus(payload.status);
       updateDebugOverlay();

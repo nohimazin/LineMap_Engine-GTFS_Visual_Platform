@@ -58,6 +58,14 @@
           <div id="stopSearchList" class="stop-search-list"></div>
         </section>
 
+        <section class="card grow">
+          <div class="card-header">
+            <h2>🚌 走行中のバス検索</h2>
+            <input id="vehicleSearchInput" placeholder="車両番号・路線名検索" />
+          </div>
+          <div id="vehicleSearchList" class="stop-search-list"></div>
+        </section>
+
         <section class="card card-group">
           <h2>⚙️ 表示設定</h2>
           <div class="card-subsection">
@@ -181,18 +189,21 @@
               <h3 id="gtfsDetailTitle">GTFS個別設定</h3>
               <button id="backToGtfsListBtn" class="secondary-button" type="button">GTFS一覧に戻る</button>
             </div>
+            <button id="openGtfsOverwriteBtn" class="secondary-button" type="button">このGTFSを上書きアップロード</button>
             <button id="deleteGtfsBtn" class="danger-button" type="button">このGTFSを削除</button>
             <h3>GTFS-RT車両情報</h3>
             <label for="rtUrlInput">Vehicle Positions URL</label>
             <input id="rtUrlInput" type="url" placeholder="https://example.com/vehiclePositions.pb" />
+            <label for="tripUpdateUrlInput">TripUpdate URL</label>
+            <input id="tripUpdateUrlInput" type="url" placeholder="https://example.com/tripUpdates.pb" />
             <label for="rtIntervalInput">更新間隔</label>
             <div class="inline-controls rt-interval-row">
               <input id="rtIntervalInput" type="number" min="5" max="60" value="10" />
               <span>秒</span>
             </div>
-            <label for="rtVehicleColorInput">車両マーカー色</label>
+            <label for="rtVehicleColorInput">車両・事業者表示色</label>
             <input id="rtVehicleColorInput" class="vehicle-color-input" type="color" value="#e4572e" />
-            <p class="hint">車両マーカーに使用する色を選択します。</p>
+            <p class="hint">車両マーカーと車両ポップアップの事業者名に使用する色を選択します。</p>
           </section>
           <p id="datasetSettingsResult" class="hint" role="status"></p>
           <div id="gtfsLoadProgressWrap" class="load-progress is-hidden" aria-live="polite">
@@ -230,14 +241,16 @@
             <h3>GTFS-RT車両情報（任意）</h3>
             <label for="gtfsUploadRtUrlInput">Vehicle Positions URL</label>
             <input id="gtfsUploadRtUrlInput" type="url" placeholder="未設定でも保存できます" />
+            <label for="gtfsUploadTripUpdateUrlInput">TripUpdate URL</label>
+            <input id="gtfsUploadTripUpdateUrlInput" type="url" placeholder="遅延情報を使う場合に指定" />
             <label for="gtfsUploadRtIntervalInput">更新間隔</label>
             <div class="inline-controls rt-interval-row">
               <input id="gtfsUploadRtIntervalInput" type="number" min="5" max="60" value="10" />
               <span>秒</span>
             </div>
-            <label for="gtfsUploadVehicleColorInput">車両マーカー色</label>
+            <label for="gtfsUploadVehicleColorInput">車両・事業者表示色</label>
             <input id="gtfsUploadVehicleColorInput" class="vehicle-color-input" type="color" value="#e4572e" />
-            <p class="hint">車両マーカーに使用する色を選択します。URLを空欄にするとGTFS-RTなしで保存します。</p>
+            <p class="hint">車両マーカーと車両ポップアップの事業者名に使用する色を選択します。URLを空欄にするとGTFS-RTなしで保存します。</p>
           </section>
           <p id="gtfsUploadResult" class="hint" role="status"></p>
           <div id="gtfsUploadProgressWrap" class="load-progress is-hidden" aria-live="polite">

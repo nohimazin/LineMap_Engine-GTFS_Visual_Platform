@@ -13,6 +13,7 @@ MAX_GZIP_PAYLOAD_SIZE = 25 * 1024 * 1024  # 25MB limit to prevent decompression 
 class RealtimeVehicleService:
     def __init__(self) -> None:
         self._url: str | None = None
+        self._trip_update_url: str | None = None
         self._interval_sec: int = 10
         self._vehicles: dict[str, Any] = {"type": "FeatureCollection", "features": []}
         self._last_update_unix: int | None = None
@@ -49,8 +50,9 @@ class RealtimeVehicleService:
         self._last_http_status = None
         self._consecutive_error_count = 0
 
-    def configure(self, url: str | None, interval_sec: int | None = None) -> None:
+    def configure(self, url: str | None, interval_sec: int | None = None, trip_update_url: str | None = None) -> None:
         new_url = url.strip() if url else None
+        self._trip_update_url = trip_update_url.strip() if trip_update_url else None
         if new_url != self._url:
             self._url = new_url
             self._last_error = None
@@ -73,15 +75,44 @@ class RealtimeVehicleService:
                 response = await client.get(self._url)
                 response.raise_for_status()
                 self._last_http_status = response.status_code
+                vehicle_payload = response.content
+                trip_payload = None
+                if self._trip_update_url:
+                    trip_response = await client.get(self._trip_update_url)
+                    trip_response.raise_for_status()
+                    trip_payload = trip_response.content
 
-            payload = response.content
-            if payload[:2] == b"\x1f\x8b":
-                if len(payload) > MAX_GZIP_PAYLOAD_SIZE:
-                    raise ValueError("GTFS-RT payload exceeds maximum allowed size.")
-                payload = gzip.decompress(payload)
+            def parse_feed(payload: bytes) -> gtfs_realtime_pb2.FeedMessage:
+                if payload[:2] == b"\x1f\x8b":
+                    if len(payload) > MAX_GZIP_PAYLOAD_SIZE:
+                        raise ValueError("GTFS-RT payload exceeds maximum allowed size.")
+                    payload = gzip.decompress(payload)
+                result = gtfs_realtime_pb2.FeedMessage()
+                result.ParseFromString(payload)
+                return result
 
-            feed = gtfs_realtime_pb2.FeedMessage()
-            feed.ParseFromString(payload)
+            feed = parse_feed(vehicle_payload)
+            trip_update_feed = parse_feed(trip_payload) if trip_payload else feed
+
+            trip_delays: dict[str, dict[int, int]] = {}
+            for entity in trip_update_feed.entity:
+                if not entity.HasField("trip_update") or not entity.trip_update.HasField("trip"):
+                    continue
+                trip_id = entity.trip_update.trip.trip_id
+                if not trip_id:
+                    continue
+                delays: dict[int, int] = {}
+                for stop_update in entity.trip_update.stop_time_update:
+                    delay = None
+                    if stop_update.HasField("departure") and stop_update.departure.HasField("delay"):
+                        delay = stop_update.departure.delay
+                    elif stop_update.HasField("arrival") and stop_update.arrival.HasField("delay"):
+                        delay = stop_update.arrival.delay
+                    if delay is None:
+                        continue
+                    delays[stop_update.stop_sequence] = delay
+                if delays:
+                    trip_delays[trip_id] = delays
 
             features: list[dict[str, Any]] = []
             for entity in feed.entity:
@@ -111,6 +142,14 @@ class RealtimeVehicleService:
 
                 bearing = vehicle.position.bearing if vehicle.position.HasField("bearing") else 0.0
                 speed = vehicle.position.speed if vehicle.position.HasField("speed") else 0.0
+                delay_seconds = None
+                delays = trip_delays.get(trip_id)
+                if delays:
+                    current_stop_sequence = vehicle.current_stop_sequence if vehicle.HasField("current_stop_sequence") else None
+                    if current_stop_sequence in delays:
+                        delay_seconds = delays[current_stop_sequence]
+                    else:
+                        delay_seconds = next(iter(delays.values()))
 
                 features.append(
                     {
@@ -124,6 +163,7 @@ class RealtimeVehicleService:
                             "bearing": bearing,
                             "speed": speed,
                             "timestamp": vehicle.timestamp if vehicle.HasField("timestamp") else None,
+                            "delay_seconds": delay_seconds,
                         },
                     }
                 )

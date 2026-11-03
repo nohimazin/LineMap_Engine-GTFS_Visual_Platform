@@ -66,6 +66,7 @@ class DataStore:
                     "stop_count": len(self._gtfs_data.get(gid, {}).get("stops_geojson", {}).get("features", [])),
                     "is_active": gid in self._active_gtfs_ids,
                     "gtfs_rt_url": self._gtfs_data.get(gid, {}).get("gtfs_rt_config", {}).get("gtfs_rt_url"),
+                    "gtfs_trip_update_url": self._gtfs_data.get(gid, {}).get("gtfs_rt_config", {}).get("gtfs_trip_update_url"),
                     "interval_sec": self._gtfs_data.get(gid, {}).get("gtfs_rt_config", {}).get("interval_sec", 10),
                     "vehicle_color": self._gtfs_data.get(gid, {}).get("gtfs_rt_config", {}).get("vehicle_color", "#e4572e"),
                 }
@@ -94,11 +95,15 @@ class DataStore:
         gtfs_rt_url: str | None = None,
         interval_sec: int = 10,
         vehicle_color: str = "#e4572e",
+        gtfs_trip_update_url: str | None = None,
         gtfs_id: str = "default",
+        service_date: str | None = None,
+        source_zip_base64: str | None = None,
     ) -> None:
         with self._lock:
             rt_config = {
                 "gtfs_rt_url": gtfs_rt_url,
+                "gtfs_trip_update_url": gtfs_trip_update_url,
                 "interval_sec": max(5, min(interval_sec, 60)),
                 "vehicle_color": vehicle_color or "#e4572e",
             }
@@ -110,6 +115,8 @@ class DataStore:
                 "trip_to_route": trip_to_route,
                 "route_catalog": route_catalog,
                 "gtfs_rt_config": rt_config,
+                "service_date": service_date,
+                "source_zip_base64": source_zip_base64,
             }
             self._gtfs_data[gtfs_id] = data
             self._save_blob("gtfs_data", self._gtfs_data)
@@ -142,6 +149,8 @@ class DataStore:
                 "trip_to_route": dict(data.get("trip_to_route", {})),
                 "route_catalog": [dict(item) for item in data.get("route_catalog", [])],
                 "gtfs_rt_config": dict(data.get("gtfs_rt_config", {})),
+                "service_date": data.get("service_date"),
+                "source_zip_base64": data.get("source_zip_base64"),
             }
 
     def active_map_data(self) -> dict[str, Any]:
@@ -185,12 +194,13 @@ class DataStore:
                 "active_gtfs_ids": list(self._active_gtfs_ids),
             }
 
-    def update_gtfs_rt_config(self, gtfs_id: str, gtfs_rt_url: str | None, interval_sec: int, vehicle_color: str) -> None:
+    def update_gtfs_rt_config(self, gtfs_id: str, gtfs_rt_url: str | None, interval_sec: int, vehicle_color: str, gtfs_trip_update_url: str | None = None) -> None:
         with self._lock:
             if gtfs_id not in self._gtfs_data:
                 raise ValueError(f"GTFS {gtfs_id} が見つかりません")
             self._gtfs_data[gtfs_id]["gtfs_rt_config"] = {
                 "gtfs_rt_url": gtfs_rt_url,
+                "gtfs_trip_update_url": gtfs_trip_update_url,
                 "interval_sec": max(5, min(interval_sec, 60)),
                 "vehicle_color": vehicle_color,
             }
