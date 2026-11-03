@@ -460,7 +460,7 @@ function buildVehiclePopupHtml(properties = {}) {
   const timestamp = Number.isFinite(timestampValue) && timestampValue > 0
     ? new Date(timestampValue * 1000).toLocaleString("ja-JP", { hour12: false })
     : "不明";
-  const searchText = `${agencyName} ${vehicleLabel}`.trim();
+  const searchText = `${agencyName} 車両 ${vehicleLabel}`.trim();
   const vehicleNumber = agencyName && vehicleLabel !== "不明"
     ? `<a href="https://www.google.com/search?q=${encodeURIComponent(searchText)}" target="_blank" rel="noopener noreferrer">車両番号: ${escapeHtml(vehicleLabel)}</a>`
     : `車両番号: ${escapeHtml(vehicleLabel)}`;
