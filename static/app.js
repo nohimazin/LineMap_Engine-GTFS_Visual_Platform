@@ -85,6 +85,7 @@ const state = {
   mergeColorSide: savedState.mergeColorSide || "first",
   stopConnectionsLineWidth: savedState.stopConnectionsLineWidth ?? 2.5,
   baseMapStyle: initialStyle,
+  gtfsAgencies: {},
 };
 
 const routeList = document.getElementById("routeList");
@@ -250,6 +251,43 @@ function normalizeRtStatus(status) {
 }
 
 function renderRtStatus(status) {
+  const statusEntries = status && status.url === undefined && status.last_error === undefined
+    ? Object.entries(status)
+    : null;
+  if (statusEntries) {
+    if (statusEntries.length === 0) {
+      setRtStatus("RT更新: 接続設定なし", "neutral");
+      if (rtErrorDetails) rtErrorDetails.textContent = "";
+      return;
+    }
+
+    const messages = statusEntries.map(([datasetId, datasetStatus]) => {
+      const agencyName = state.gtfsAgencies[datasetId] || datasetId;
+      const lastUpdateText = formatRtLastUpdate(datasetStatus?.last_update_unix);
+      const lastSuccessText = formatRtLastUpdate(datasetStatus?.last_success_unix);
+      const intervalText = datasetStatus?.interval_sec ? `${datasetStatus.interval_sec}秒間隔` : "間隔未設定";
+      const urlText = datasetStatus?.url ? "接続設定あり" : "未設定";
+      const vehicleCountText = `車両 ${datasetStatus?.vehicle_count ?? 0}台`;
+      const retryText = datasetStatus?.consecutive_error_count
+        ? ` / 連続失敗 ${datasetStatus.consecutive_error_count}回`
+        : "";
+      const httpText = datasetStatus?.last_http_status ? ` / HTTP ${datasetStatus.last_http_status}` : "";
+      if (datasetStatus?.last_error) {
+        return `RT Error [${agencyName}]: ${datasetStatus.last_error}${retryText}${httpText}`;
+      }
+      return `RT更新 [${agencyName}]: ${lastUpdateText} / 成功: ${lastSuccessText} / ${vehicleCountText} / ${intervalText} / ${urlText}${retryText}${httpText}`;
+    });
+    const hasError = statusEntries.some(([, datasetStatus]) => datasetStatus?.last_error);
+    setRtStatus(messages.join("\n"), hasError ? "error" : "ok");
+    if (rtErrorDetails) {
+      rtErrorDetails.textContent = statusEntries
+        .filter(([, datasetStatus]) => datasetStatus?.last_error)
+        .map(([datasetId, datasetStatus]) => `[${state.gtfsAgencies[datasetId] || datasetId}] ${formatRtErrorHistory(datasetStatus)}`)
+        .join("\n\n");
+    }
+    return;
+  }
+
   status = normalizeRtStatus(status);
   if (status?.last_error) {
     const retryText = status?.consecutive_error_count ? ` / 連続失敗 ${status.consecutive_error_count}回` : "";
@@ -1691,6 +1729,9 @@ async function refreshGtfsList() {
   try {
     const response = await api("/gtfs_list");
     const gtfsItems = response.gtfs_list || [];
+    state.gtfsAgencies = Object.fromEntries(
+      gtfsItems.map((item) => [item.gtfs_id, item.agency_name || item.gtfs_id]),
+    );
 
     if (!gtfsList) return;
     gtfsList.innerHTML = "";
@@ -1724,12 +1765,14 @@ async function refreshGtfsList() {
       gtfsList.appendChild(row);
     });
 
-    if (gtfsItems.length > 0) {
-      const current = gtfsItems.find((item) => item.is_active);
-      if (current && gtfsSelectResult) {
-        gtfsSelectResult.textContent = `現在: ${current.gtfs_id} (路線: ${current.route_count}, 停留所: ${current.stop_count})`;
+    if (gtfsSelectResult) {
+      const activeItems = gtfsItems.filter((item) => item.is_active);
+      if (activeItems.length > 0) {
+        const activeNames = activeItems.map((item) => item.gtfs_id).join("、");
+        gtfsSelectResult.textContent = `表示中: ${activeNames}`;
+      } else {
+        gtfsSelectResult.textContent = "表示中のGTFSはありません";
       }
-
     }
   } catch (err) {
     console.warn("GTFS一覧の取得に失敗しました", err);

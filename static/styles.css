@@ -439,6 +439,10 @@ button:hover {
   color: #a13535;
 }
 
+#rtStatus {
+  white-space: pre-line;
+}
+
 #rtStatus[data-state="ok"] {
   color: var(--accent-strong);
 }

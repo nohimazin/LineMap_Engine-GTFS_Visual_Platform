@@ -62,6 +62,7 @@ class DataStore:
             return [
                 {
                     "gtfs_id": gid,
+                    "agency_name": self._gtfs_data.get(gid, {}).get("agency_name", ""),
                     "route_count": len(self._gtfs_data.get(gid, {}).get("route_catalog", [])),
                     "stop_count": len(self._gtfs_data.get(gid, {}).get("stops_geojson", {}).get("features", [])),
                     "is_active": gid in self._active_gtfs_ids,
