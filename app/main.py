@@ -38,11 +38,11 @@ static_dir = Path(__file__).resolve().parent.parent / "static"
 def _refresh_service_data_if_needed() -> None:
     today = date.today().isoformat()
     for gid in store.active_gtfs_ids():
-        data = store.gtfs_data(gid) or {}
-        if data.get("service_date") == today or not data.get("source_zip_base64"):
+        data = store.gtfs_data(gid)
+        if data["service_date"] == today:
             continue
         parsed = parse_gtfs_zip(base64.b64decode(data["source_zip_base64"]))
-        config = data.get("gtfs_rt_config", {})
+        config = data["gtfs_rt_config"]
         store.update_gtfs(
             routes_geojson=parsed["routes_geojson"],
             stops_geojson=parsed["stops_geojson"],
@@ -50,10 +50,10 @@ def _refresh_service_data_if_needed() -> None:
             trip_to_route=parsed["trip_to_route"],
             route_catalog=parsed["route_catalog"],
             agency_name=parsed["agency_name"],
-            gtfs_rt_url=config.get("gtfs_rt_url"),
-            gtfs_trip_update_url=config.get("gtfs_trip_update_url"),
-            interval_sec=config.get("interval_sec", 10),
-            vehicle_color=config.get("vehicle_color", "#e4572e"),
+            gtfs_rt_url=config["gtfs_rt_url"],
+            gtfs_trip_update_url=config["gtfs_trip_update_url"],
+            interval_sec=config["interval_sec"],
+            vehicle_color=config["vehicle_color"],
             gtfs_id=gid,
             service_date=parsed["service_date"],
             source_zip_base64=data["source_zip_base64"],
@@ -64,13 +64,13 @@ def _refresh_service_data_if_needed() -> None:
 async def lifespan(_: FastAPI):
     for item in store.list_gtfs():
         gid = item["gtfs_id"]
-        data = store.gtfs_data(gid) or {}
-        config = data.get("gtfs_rt_config", {})
+        data = store.gtfs_data(gid)
+        config = data["gtfs_rt_config"]
         service = RealtimeVehicleService()
-        service.configure(config.get("gtfs_rt_url"), config.get("interval_sec", 10), config.get("gtfs_trip_update_url"))
+        service.configure(config["gtfs_rt_url"], config["interval_sec"], config["gtfs_trip_update_url"])
         rt_services[gid] = service
         rt_tasks[gid] = asyncio.create_task(
-            service.polling_loop(lambda gid=gid: (store.gtfs_data(gid) or {}).get("trip_to_route", {}))
+            service.polling_loop(lambda gid=gid: store.gtfs_data(gid)["trip_to_route"])
         )
     try:
         yield
@@ -81,8 +81,7 @@ async def lifespan(_: FastAPI):
             with suppress(asyncio.CancelledError):
                 await task
         rt_services.clear()
-        for service in list(rt_services.values()):
-            await service.close()
+        rt_tasks.clear()
 
 
 app = FastAPI(title="LineMap Engine GTFS Visual Platform", version="0.1.0", lifespan=lifespan)
@@ -160,16 +159,16 @@ async def upload_gtfs(
         service_date=parsed["service_date"],
         source_zip_base64=base64.b64encode(raw_zip).decode("ascii"),
     )
-    config = store.gtfs_data(gtfs_id).get("gtfs_rt_config", {})
+    config = store.gtfs_data(gtfs_id)["gtfs_rt_config"]
     service = rt_services.setdefault(gtfs_id, RealtimeVehicleService())
-    service.configure(config.get("gtfs_rt_url"), config.get("interval_sec", 10), config.get("gtfs_trip_update_url"))
-    if config.get("gtfs_rt_url"):
+    service.configure(config["gtfs_rt_url"], config["interval_sec"], config["gtfs_trip_update_url"])
+    if config["gtfs_rt_url"]:
         await service.fetch_once(parsed["trip_to_route"])
 
     if gtfs_id in rt_tasks:
         rt_tasks[gtfs_id].cancel()
     rt_tasks[gtfs_id] = asyncio.create_task(
-        service.polling_loop(lambda gid=gtfs_id: (store.gtfs_data(gid) or {}).get("trip_to_route", {}))
+        service.polling_loop(lambda gid=gtfs_id: store.gtfs_data(gid)["trip_to_route"])
     )
 
     return {
@@ -209,7 +208,7 @@ def stop_connections() -> dict:
 def agency() -> dict[str, str]:
     _refresh_service_data_if_needed()
     names = [
-        (store.gtfs_data(gtfs_id) or {}).get("agency_name", "")
+        store.gtfs_data(gtfs_id)["agency_name"]
         for gtfs_id in store.active_gtfs_ids()
     ]
     return {"agency_name": " / ".join(name for name in names if name)}
@@ -223,10 +222,10 @@ def vehicles() -> dict:
         service = rt_services.get(gid)
         if not service:
             continue
-        data = store.gtfs_data(gid) or {}
-        color = data.get("gtfs_rt_config", {}).get("vehicle_color", "#e4572e")
-        agency_name = data.get("agency_name", "")
-        for feature in service.vehicles().get("features", []):
+        data = store.gtfs_data(gid)
+        color = data["gtfs_rt_config"]["vehicle_color"]
+        agency_name = data["agency_name"]
+        for feature in service.vehicles()["features"]:
             feature = dict(feature)
             properties = {
                 **feature.get("properties", {}),
@@ -259,12 +258,6 @@ async def delete_gtfs(gtfs_id: str) -> dict:
         if task:
             task.cancel()
         rt_services.pop(gtfs_id, None)
-        task = rt_tasks.pop(gtfs_id, None)
-        if task:
-            task.cancel()
-        service = rt_services.pop(gtfs_id, None)
-        if service:
-            await service.close()
         return {
             "message": f"GTFS {gtfs_id} を削除しました",
             "list": store.list_gtfs(),
@@ -302,7 +295,7 @@ async def update_dataset_settings(payload: DatasetSettingsRequest) -> dict:
         str(payload.gtfs_trip_update_url) if payload.gtfs_trip_update_url else None,
     )
     if payload.gtfs_rt_url:
-        await service.fetch_once(data.get("trip_to_route", {}))
+        await service.fetch_once(data["trip_to_route"])
     status["vehicle_color"] = payload.vehicle_color
     return {
         "message": "GTFSとGTFS-RT設定を保存しました。",

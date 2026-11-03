@@ -66,7 +66,7 @@ const state = {
   routeToGroup: {},
   groupToRoutes: {},
   visibleRouteIds: new Set(savedState.visibleRouteIds || []),
-  visibleRawRouteIds: new Set(savedState.visibleRawRouteIds || savedState.visibleRouteIds || []),
+  visibleRawRouteIds: new Set(savedState.visibleRawRouteIds || []),
   showStops: savedState.showStops ?? true,
   showStopConnections: savedState.showStopConnections ?? false,
   showTodayStopConnections: savedState.showTodayStopConnections ?? false,
@@ -589,9 +589,9 @@ function syncVehicleMarkers() {
     }
   }
 
-  for (const [markerId, marker] of vehicleMarkers) {
+  for (const markerId of Array.from(vehicleMarkers.keys())) {
     if (!activeIds.has(markerId)) {
-      marker.remove();
+      vehicleMarkers.get(markerId)?.remove();
       vehicleMarkers.delete(markerId);
     }
   }
@@ -637,6 +637,7 @@ function applyLayerVisibility() {
   }
   if (map.getLayer("vehicles-symbol")) {
     map.setLayoutProperty("vehicles-symbol", "visibility", state.showVehicles ? "visible" : "none");
+    map.setLayoutProperty("vehicles-symbol", "text-field", state.showVehicleIds ? ["get", "vehicle_id"] : "");
   }
   if (map.getLayer("vehicles-circle")) {
     map.setLayoutProperty("vehicles-circle", "visibility", state.showVehicles ? "visible" : "none");
@@ -644,7 +645,6 @@ function applyLayerVisibility() {
   for (const marker of vehicleMarkers.values()) {
     marker.getElement().hidden = !state.showVehicles;
   }
-    console.log("[applyLayerVisibility]", { showStops: state.showStops, showVehicles: state.showVehicles, showStopConnections: state.showStopConnections, mergeRoundTrip: state.mergeRoundTrip, stopConnectionsVisible });
     updateDebugOverlay();
 }
 
@@ -996,11 +996,9 @@ function normalizeRouteDatasets() {
     features: (state.rawStops.features || []).filter(
       (feature) =>
         (!state.showTodayStops ||
-          feature?.properties?.service_active_today === true ||
-          (feature?.properties?.service_active_today === undefined &&
-            (feature?.properties?.routes || []).length > 0)) &&
+          feature?.properties?.service_active_today === true) &&
         (!state.hideLongStopStations ||
-          (feature?.properties?.routes_all || feature?.properties?.routes || []).some(
+          (feature?.properties?.routes_all || []).some(
             (routeId) => !longRouteIds.has(normalizeRouteId(routeId)),
           )),
     ),
@@ -2014,13 +2012,21 @@ async function openGtfsDetailView(gtfsId = getSelectedGtfsIds()[0]) {
 }
 
 function openGtfsUpload(targetGtfsId = null) {
+  // クリックイベントなどが誤って渡されても新規アップロードとして扱う
+  if (typeof targetGtfsId !== "string" || !targetGtfsId) {
+    targetGtfsId = null;
+  }
   const gtfsIdInput = document.getElementById("gtfsIdInput");
   const uploadDialogTitle = gtfsUploadDialog?.querySelector(".settings-dialog-header h2");
+  const uploadDialogEyebrow = gtfsUploadDialog?.querySelector(".settings-dialog-header .eyebrow");
   const gtfsIdLabel = document.querySelector('label[for="gtfsIdInput"]');
   gtfsIdInput.value = targetGtfsId || "default";
   gtfsIdInput.readOnly = Boolean(targetGtfsId);
   if (uploadDialogTitle) {
     uploadDialogTitle.textContent = targetGtfsId ? "GTFSを上書きアップロード" : "新規GTFSをアップロード";
+  }
+  if (uploadDialogEyebrow) {
+    uploadDialogEyebrow.textContent = targetGtfsId ? "OVERWRITE GTFS" : "NEW GTFS";
   }
   if (gtfsIdLabel) {
     gtfsIdLabel.textContent = targetGtfsId ? "上書き対象のGTFS ID" : "保存するGTFS ID";
@@ -2074,7 +2080,7 @@ function wireActions() {
   cancelDatasetSettingsBtn?.addEventListener("click", () => datasetSettingsDialog?.close());
   saveDatasetSettingsBtn?.addEventListener("click", saveDatasetSettings);
   deleteGtfsBtn?.addEventListener("click", deleteSelectedGtfs);
-  openGtfsUploadBtn?.addEventListener("click", openGtfsUpload);
+  openGtfsUploadBtn?.addEventListener("click", () => openGtfsUpload(null));
   openGtfsOverwriteBtn?.addEventListener("click", () => {
     const gtfsId = gtfsDetailTitle?.dataset.gtfsId;
     if (gtfsId) openGtfsUpload(gtfsId);
@@ -2085,8 +2091,13 @@ function wireActions() {
     try {
       const result = await uploadGtfs();
       if (!result) return;
+      const wasOverwrite = document.getElementById("gtfsIdInput")?.readOnly;
       gtfsUploadDialog?.close();
-      if (datasetSettingsResult) datasetSettingsResult.textContent = "新しいGTFSを登録し、表示対象に追加しました。必要に応じて設定を確認し、「保存して閉じる」で閉じてください。";
+      if (datasetSettingsResult) {
+        datasetSettingsResult.textContent = wasOverwrite
+          ? "GTFSを上書きアップロードしました。必要に応じて設定を確認し、「保存して閉じる」で閉じてください。"
+          : "新しいGTFSを登録し、表示対象に追加しました。必要に応じて設定を確認し、「保存して閉じる」で閉じてください。";
+      }
     } catch (err) {
       // uploadGtfs already renders the error in the upload dialog.
     }

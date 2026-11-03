@@ -245,6 +245,19 @@ def _active_service_ids(
     return active
 
 
+def _time_sort_key(time_text: str) -> int:
+    parts = str(time_text or "").strip().split(":")
+    if len(parts) < 2:
+        return 0
+    try:
+        hours = int(parts[0])
+        minutes = int(parts[1])
+        seconds = int(parts[2]) if len(parts) > 2 and parts[2] else 0
+    except ValueError:
+        return 0
+    return hours * 3600 + minutes * 60 + seconds
+
+
 def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
     with zipfile.ZipFile(io.BytesIO(raw_zip)) as archive:
         routes_rows = _read_csv_from_zip(archive, "routes.txt")
@@ -549,7 +562,7 @@ def parse_gtfs_zip(raw_zip: bytes) -> dict[str, Any]:
                     "parent_station": stop_parent_station.get(stop_id, ""),
                     "routes": sorted(list(stop_to_routes.get(stop_id, set()))),
                     "routes_all": sorted(list(stop_to_all_routes.get(stop_id, set()))),
-                    "times": sorted(list(stop_to_times.get(stop_id, set()))),
+                    "times": sorted(list(stop_to_times.get(stop_id, set())), key=_time_sort_key),
                     "service_active_today": bool(stop_to_routes.get(stop_id)),
                     "service_date": service_date.isoformat(),
                     "service_label": service_label,
