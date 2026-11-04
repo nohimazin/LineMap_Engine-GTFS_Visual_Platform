@@ -81,6 +81,7 @@ const state = {
   showStopTimeSeconds: savedState.showStopTimeSeconds ?? false,
   showVehicleIds: savedState.showVehicleIds ?? false,
   showVehicleBearing: savedState.showVehicleBearing ?? false,
+  showVehicleArrow: savedState.showVehicleArrow ?? true,
   mergeRoundTrip: savedState.mergeRoundTrip ?? false,
   mergeColorSide: savedState.mergeColorSide || "first",
   stopConnectionsLineWidth: savedState.stopConnectionsLineWidth ?? 2.5,
@@ -332,6 +333,7 @@ function saveUiState() {
       showStopTimeSeconds: state.showStopTimeSeconds,
       showVehicleIds: state.showVehicleIds,
       showVehicleBearing: state.showVehicleBearing,
+      showVehicleArrow: state.showVehicleArrow,
       mergeRoundTrip: state.mergeRoundTrip,
       mergeColorSide: state.mergeColorSide,
       stopConnectionsLineWidth: state.stopConnectionsLineWidth,
@@ -638,6 +640,9 @@ function applyLayerVisibility() {
   if (map.getLayer("vehicles-symbol")) {
     map.setLayoutProperty("vehicles-symbol", "visibility", state.showVehicles ? "visible" : "none");
     map.setLayoutProperty("vehicles-symbol", "text-field", state.showVehicleIds ? ["get", "vehicle_id"] : "");
+  }
+  if (map.getLayer("vehicles-arrow")) {
+    map.setLayoutProperty("vehicles-arrow", "visibility", (state.showVehicles && state.showVehicleArrow) ? "visible" : "none");
   }
   if (map.getLayer("vehicles-circle")) {
     map.setLayoutProperty("vehicles-circle", "visibility", state.showVehicles ? "visible" : "none");
@@ -1330,10 +1335,6 @@ function createLayersIfNeeded() {
       type: "symbol",
       source: "vehicles",
       layout: {
-        "icon-image": "vehicle-arrow",
-        "icon-size": 1.2,
-        "icon-rotate": ["coalesce", ["get", "bearing"], 0],
-        "icon-allow-overlap": true,
         "text-field": ["get", "vehicle_id"],
         "text-font": ["Open Sans Regular"],
         "text-size": 9,
@@ -1345,6 +1346,18 @@ function createLayersIfNeeded() {
         "text-color": "#333",
         "text-halo-color": "#fff",
         "text-halo-width": 0.8,
+      },
+    });
+    map.addLayer({
+      id: "vehicles-arrow",
+      type: "symbol",
+      source: "vehicles",
+      layout: {
+        "icon-image": "vehicle-arrow",
+        "icon-size": 1.2,
+        "icon-rotate": ["coalesce", ["get", "bearing"], 0],
+        "icon-allow-overlap": true,
+        visibility: (state.showVehicles && state.showVehicleArrow) ? "visible" : "none",
       },
     });
   }
@@ -2212,6 +2225,15 @@ function wireActions() {
       saveUiState();
     });
   }
+  const showVehicleArrowToggle = document.getElementById("showVehicleArrowToggle");
+  if (showVehicleArrowToggle) {
+    showVehicleArrowToggle.checked = state.showVehicleArrow;
+    showVehicleArrowToggle.addEventListener("change", () => {
+      state.showVehicleArrow = showVehicleArrowToggle.checked;
+      saveUiState();
+      applyLayerVisibility();
+    });
+  }
   mergeColorSideSelect.value = state.mergeColorSide;
   mergeColorSideSelect.disabled = !state.mergeRoundTrip;
   syncStopConnectionsWidthControls();
@@ -2375,6 +2397,18 @@ function wireActions() {
   });
 
   map.on("click", "vehicles-symbol", (e) => {
+    const f = e.features?.[0];
+    if (!f) return;
+    const p = f.properties || {};
+    showVehiclePopup([e.lngLat.lng, e.lngLat.lat], p);
+  });
+  map.on("click", "vehicles-arrow", (e) => {
+    const f = e.features?.[0];
+    if (!f) return;
+    const p = f.properties || {};
+    showVehiclePopup([e.lngLat.lng, e.lngLat.lat], p);
+  });
+  map.on("click", "vehicles-circle", (e) => {
     const f = e.features?.[0];
     if (!f) return;
     const p = f.properties || {};

@@ -140,6 +140,14 @@
               <span>方位を表示する</span>
             </label>
           </div>
+          <div class="card-subsection">
+            <h3>車両マーカー</h3>
+            <label class="checkbox-row">
+              <input id="showVehicleArrowToggle" type="checkbox" />
+              <span>進行方向の矢印を表示する</span>
+            </label>
+            <p class="hint">GTFS-RTのbearing（方位）情報を提供している事業者のみ矢印が正しく表示されます。提供していない事業者では矢印が上向き（北）固定になるため、不要な場合はオフにできます。</p>
+          </div>
         </section>
 
         <section class="card">
@@ -266,6 +274,6 @@
 
     <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
     <script src="/static/performance-monitor.js?v=20260502f"></script>
-    <script src="/static/app.js?v=20261103-gtfs-upload-fix"></script>
+    <script src="/static/app.js?v=20261104-vehicle-arrow-toggle"></script>
   </body>
 </html>
