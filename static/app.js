@@ -452,8 +452,17 @@ function buildVehiclePopupHtml(properties = {}) {
   const agencyName = normalizeDisplayText(properties.vehicle_agency_name);
   const vehicleColor = getVehicleDisplayColor(properties.vehicle_color);
   const bearingValue = Number(properties.bearing);
+  const estimatedBearingValue = properties.estimated_bearing !== null && properties.estimated_bearing !== undefined
+    ? Number(properties.estimated_bearing) : null;
+  const hasBearing = properties.has_bearing === true;
+  const showEstimate = state.showEstimatedBearing;
+  const hasDirection = hasBearing || (showEstimate && estimatedBearingValue !== null);
   const speedValue = Number(properties.speed);
-  const bearing = Number.isFinite(bearingValue) ? `${bearingValue.toFixed(1)}°` : "不明";
+  const bearing = hasBearing
+    ? (Number.isFinite(bearingValue) ? `${bearingValue.toFixed(1)}°` : "不明")
+    : (showEstimate && estimatedBearingValue !== null
+        ? `${estimatedBearingValue.toFixed(1)}°（推測）`
+        : "不明");
   const speed = Number.isFinite(speedValue) ? `${(speedValue * 3.6).toFixed(1)} km/h` : "不明";
   const hasDelay = properties.delay_seconds !== null && properties.delay_seconds !== undefined;
   const delaySeconds = Number(properties.delay_seconds);
@@ -586,10 +595,12 @@ function syncVehicleMarkers() {
       } else {
         marker.setLngLat({ lng: longitude, lat: latitude });
       }
+      const hasDir = (properties.has_bearing === true) ||
+        (state.showEstimatedBearing && properties.estimated_bearing !== null && properties.estimated_bearing !== undefined);
       marker.getElement().style.backgroundColor = properties.vehicle_color || "#e4572e";
       marker.getElement()._vehicleCoordinates = [longitude, latitude];
       marker.getElement()._vehicleProperties = properties;
-      marker.getElement().hidden = !state.showVehicles || state.showVehicleArrow;
+      marker.getElement().hidden = !state.showVehicles || (state.showVehicleArrow && hasDir);
     } catch (error) {
       console.warn("車両Markerの描画をスキップしました", { markerId, longitude, latitude, error });
     }
@@ -652,14 +663,25 @@ function applyLayerVisibility() {
           ["coalesce", ["get", "estimated_bearing"], ["get", "bearing"], 0],
           ["coalesce", ["get", "bearing"], 0]]
       : ["coalesce", ["get", "bearing"], 0];
+    const opacity = state.showEstimatedBearing
+      ? ["case", ["any", ["coalesce", ["get", "has_bearing"], false], ["!=", ["get", "estimated_bearing"], null]], 1, 0]
+      : ["case", ["coalesce", ["get", "has_bearing"], false], 1, 0];
     map.setLayoutProperty("vehicles-arrow", "icon-rotate", rotation);
+    map.setPaintProperty("vehicles-arrow", "icon-opacity", opacity);
     map.setLayoutProperty("vehicles-arrow", "visibility", (state.showVehicles && state.showVehicleArrow) ? "visible" : "none");
   }
   if (map.getLayer("vehicles-circle")) {
-    map.setLayoutProperty("vehicles-circle", "visibility", (state.showVehicles && !state.showVehicleArrow) ? "visible" : "none");
+    map.setLayoutProperty("vehicles-circle", "visibility", state.showVehicles ? "visible" : "none");
+    const circleOpacity = state.showVehicleArrow
+      ? ["case", ["any", ["coalesce", ["get", "has_bearing"], false], ["!=", ["get", "estimated_bearing"], null]], 0, 0.95]
+      : 0.95;
+    map.setPaintProperty("vehicles-circle", "circle-opacity", circleOpacity);
   }
   for (const marker of vehicleMarkers.values()) {
-    marker.getElement().hidden = !state.showVehicles || state.showVehicleArrow;
+    const props = marker.getElement()._vehicleProperties || {};
+    const hasDir = props.has_bearing === true ||
+      (state.showEstimatedBearing && props.estimated_bearing !== null && props.estimated_bearing !== undefined);
+    marker.getElement().hidden = !state.showVehicles || (state.showVehicleArrow && hasDir);
   }
     updateDebugOverlay();
 }
@@ -1000,6 +1022,15 @@ function normalizeRouteId(value) {
   return String(value ?? "").trim();
 }
 
+function routeBaseId(value) {
+  const s = normalizeRouteId(value);
+  const colonIdx = s.indexOf(":");
+  const rest = colonIdx >= 0 ? s.slice(colonIdx + 1) : s;
+  const us = rest.indexOf("_");
+  const base = us >= 0 ? rest.slice(0, us) : rest;
+  return colonIdx >= 0 ? s.slice(0, colonIdx + 1) + base : base;
+}
+
 function normalizeRouteDatasets() {
   const longRouteIds = new Set(
     (state.rawStopConnections.features || [])
@@ -1028,12 +1059,13 @@ function normalizeRouteDatasets() {
           Number(feature?.properties?.max_stop_spacing_km || 0) <= state.maxStopSpacingKm),
     ),
   };
+  const longRouteBases = new Set(Array.from(longRouteIds).map(routeBaseId));
   state.vehicles = {
     type: "FeatureCollection",
     features: (state.rawVehicles.features || []).filter(
       (feature) =>
         !state.hideLongRouteVehicles ||
-        !longRouteIds.has(normalizeRouteId(feature?.properties?.route_id)),
+        !longRouteBases.has(routeBaseId(feature?.properties?.route_id)),
     ),
   };
   if (!state.mergeRoundTrip) {
@@ -1339,7 +1371,7 @@ function createLayersIfNeeded() {
         "circle-stroke-width": 2,
         "circle-opacity": 0.95,
       },
-      layout: { visibility: (state.showVehicles && !state.showVehicleArrow) ? "visible" : "none" },
+      layout: { visibility: state.showVehicles ? "visible" : "none" },
     });
     map.addLayer({
       id: "vehicles-symbol",
@@ -1372,6 +1404,7 @@ function createLayersIfNeeded() {
       },
       paint: {
         "icon-color": ["coalesce", ["get", "vehicle_color"], "#e4572e"],
+        "icon-opacity": 1,
       },
     });
   }

@@ -151,7 +151,7 @@
               <span>方位が無い場合、移動方向から推測して表示する</span>
             </label>
             <p class="hint">GTFS-RTのbearing（方位）情報を提供している事業者のみ矢印が正しく表示されます。提供していない事業者では矢印が上向き（北）固定になるため、不要な場合はオフにできます。</p>
-            <p class="hint">推測表示: 直近2回の位置情報から移動方向（方位角）を計算して矢印の向きに使用します。車両が動いていない場合は前回の推測値を保持します。GTFS-RTがbearingを提供している場合はそちらを優先します。</p>
+            <p class="hint">推測表示: GTFS-RTがbearingを提供していない車両について、直近の位置変化から移動方向（方位角）を推測して矢印の向きに使用します。位置はHaversine式でメートル換算し、累積移動距離が1mを超えた時点で方位を更新します（低速でも蓄積すれば計算）。90秒より古い測位データや異常な速度（200km/h超）は除外します。GTFS-RTがbearingを提供している場合はそちらを優先し、どちらも無い場合は矢印を非表示にして円形マーカーを表示します。車両が動いていない場合は前回の推測値を保持します。</p>
           </div>
         </section>
 
@@ -279,6 +279,6 @@
 
     <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
     <script src="/static/performance-monitor.js?v=20260502f"></script>
-    <script src="/static/app.js?v=20261104-estimated-bearing"></script>
+    <script src="/static/app.js?v=20261104-long-route-fix"></script>
   </body>
 </html>

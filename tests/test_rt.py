@@ -49,6 +49,7 @@ def test_fetch_gzipped_vehicle_positions() -> None:
         "bearing": 0.0,
         "has_bearing": False,
         "estimated_bearing": None,
+        "has_direction": False,
         "speed": 0.0,
         "timestamp": None,
         "delay_seconds": None,
