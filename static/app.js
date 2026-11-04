@@ -36,15 +36,51 @@ function resolveInitialStyle(styleUrl) {
 
 const initialStyle = resolveInitialStyle(savedState.baseMapStyle);
 
-const map = new maplibregl.Map({
-  container: "map",
-  style: initialStyle,
-  center: savedView?.center || [139.767, 35.681],
-  zoom: savedView?.zoom || 11,
-  fadeDuration: 0,
-  renderWorldCopies: false,
-  preserveDrawingBuffer: true,
-});
+function isWebGLSupported() {
+  try {
+    if (typeof maplibregl !== "undefined" && typeof maplibregl.supported === "function") {
+      return !!maplibregl.supported();
+    }
+    const canvas = document.createElement("canvas");
+    return !!(
+      canvas.getContext("webgl2") ||
+      canvas.getContext("webgl") ||
+      canvas.getContext("experimental-webgl")
+    );
+  } catch (error) {
+    console.warn("WebGLサポート判定に失敗しました", error);
+    return false;
+  }
+}
+
+function showWebGLWarning() {
+  const warning = document.getElementById("webglWarning");
+  if (warning) warning.classList.remove("is-hidden");
+  const mapEl = document.getElementById("map");
+  if (mapEl) mapEl.style.display = "none";
+}
+
+if (!isWebGLSupported()) {
+  showWebGLWarning();
+  throw new Error("WebGL is not supported by this browser.");
+}
+
+let map;
+try {
+  map = new maplibregl.Map({
+    container: "map",
+    style: initialStyle,
+    center: savedView?.center || [139.767, 35.681],
+    zoom: savedView?.zoom || 11,
+    fadeDuration: 0,
+    renderWorldCopies: false,
+    preserveDrawingBuffer: true,
+  });
+} catch (error) {
+  console.error("地図の初期化に失敗しました", error);
+  showWebGLWarning();
+  throw error;
+}
 
 map.addControl(new maplibregl.NavigationControl(), "top-right");
 window.__linemapMap = map;

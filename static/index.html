@@ -12,7 +12,7 @@
       rel="stylesheet"
     />
     <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=20261018c" />
+    <link rel="stylesheet" href="/static/styles.css?v=20261104-webgl-warning" />
   </head>
   <body>
     <div class="background-pattern" aria-hidden="true"></div>
@@ -173,6 +173,10 @@
 
       <main class="map-area">
         <div id="map"></div>
+        <div id="webglWarning" class="webgl-warning is-hidden" role="alert" aria-live="assertive">
+          <h2>WebGLがサポートされていません</h2>
+          <p>このサイトの地図表示にはWebGLが必要です。WebGLを有効にした最新のブラウザ（Chrome / Edge / Firefox / Safari など）でアクセスしてください。ハードウェアアクセラレーションが無効になっている場合はブラウザ設定で有効にしてください。</p>
+        </div>
         <button id="toggleMapFullscreenBtn" class="map-fullscreen-button" type="button" aria-label="地図を全画面表示">
           全画面
         </button>
@@ -279,6 +283,6 @@
 
     <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
     <script src="/static/performance-monitor.js?v=20260502f"></script>
-    <script src="/static/app.js?v=20261104-long-route-fix"></script>
+    <script src="/static/app.js?v=20261104-webgl-warning"></script>
   </body>
 </html>
