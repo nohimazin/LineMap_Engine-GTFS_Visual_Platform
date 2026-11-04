@@ -389,8 +389,8 @@ function createVehicleArrowIcon() {
   ctx.clearRect(0, 0, size, size);
   
   // 矢印を描画（上向き）
-  ctx.fillStyle = '#dd5c23';
-  ctx.strokeStyle = '#fff4de';
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#ffffff';
   ctx.lineWidth = 2;
   ctx.lineJoin = 'round';
   
@@ -585,7 +585,7 @@ function syncVehicleMarkers() {
       marker.getElement().style.backgroundColor = properties.vehicle_color || "#e4572e";
       marker.getElement()._vehicleCoordinates = [longitude, latitude];
       marker.getElement()._vehicleProperties = properties;
-      marker.getElement().hidden = !state.showVehicles;
+      marker.getElement().hidden = !state.showVehicles || state.showVehicleArrow;
     } catch (error) {
       console.warn("車両Markerの描画をスキップしました", { markerId, longitude, latitude, error });
     }
@@ -645,10 +645,10 @@ function applyLayerVisibility() {
     map.setLayoutProperty("vehicles-arrow", "visibility", (state.showVehicles && state.showVehicleArrow) ? "visible" : "none");
   }
   if (map.getLayer("vehicles-circle")) {
-    map.setLayoutProperty("vehicles-circle", "visibility", state.showVehicles ? "visible" : "none");
+    map.setLayoutProperty("vehicles-circle", "visibility", (state.showVehicles && !state.showVehicleArrow) ? "visible" : "none");
   }
   for (const marker of vehicleMarkers.values()) {
-    marker.getElement().hidden = !state.showVehicles;
+    marker.getElement().hidden = !state.showVehicles || state.showVehicleArrow;
   }
     updateDebugOverlay();
 }
@@ -706,7 +706,7 @@ function refreshOverlayLayers() {
   if (!map.hasImage('vehicle-arrow')) {
     const arrowImageData = createVehicleArrowIcon();
     if (arrowImageData) {
-      map.addImage('vehicle-arrow', arrowImageData, { sdf: false });
+      map.addImage('vehicle-arrow', arrowImageData, { sdf: true });
     }
   }
   
@@ -1323,12 +1323,12 @@ function createLayersIfNeeded() {
       source: "vehicles",
       paint: {
         "circle-radius": 7,
-        "circle-color": "#e4572e",
+        "circle-color": ["coalesce", ["get", "vehicle_color"], "#e4572e"],
         "circle-stroke-color": "#ffffff",
         "circle-stroke-width": 2,
         "circle-opacity": 0.95,
       },
-      layout: { visibility: state.showVehicles ? "visible" : "none" },
+      layout: { visibility: (state.showVehicles && !state.showVehicleArrow) ? "visible" : "none" },
     });
     map.addLayer({
       id: "vehicles-symbol",
@@ -1358,6 +1358,9 @@ function createLayersIfNeeded() {
         "icon-rotate": ["coalesce", ["get", "bearing"], 0],
         "icon-allow-overlap": true,
         visibility: (state.showVehicles && state.showVehicleArrow) ? "visible" : "none",
+      },
+      paint: {
+        "icon-color": ["coalesce", ["get", "vehicle_color"], "#e4572e"],
       },
     });
   }
