@@ -82,6 +82,7 @@ const state = {
   showVehicleIds: savedState.showVehicleIds ?? false,
   showVehicleBearing: savedState.showVehicleBearing ?? false,
   showVehicleArrow: savedState.showVehicleArrow ?? true,
+  showEstimatedBearing: savedState.showEstimatedBearing ?? false,
   mergeRoundTrip: savedState.mergeRoundTrip ?? false,
   mergeColorSide: savedState.mergeColorSide || "first",
   stopConnectionsLineWidth: savedState.stopConnectionsLineWidth ?? 2.5,
@@ -334,6 +335,7 @@ function saveUiState() {
       showVehicleIds: state.showVehicleIds,
       showVehicleBearing: state.showVehicleBearing,
       showVehicleArrow: state.showVehicleArrow,
+      showEstimatedBearing: state.showEstimatedBearing,
       mergeRoundTrip: state.mergeRoundTrip,
       mergeColorSide: state.mergeColorSide,
       stopConnectionsLineWidth: state.stopConnectionsLineWidth,
@@ -480,7 +482,9 @@ function buildVehiclePopupHtml(properties = {}) {
     lines.splice(2, 0, `vehicle_id: ${escapeHtml(vehicleId)}`, `route_id: ${escapeHtml(routeId || "不明")}`, `trip_id: ${escapeHtml(tripId)}`);
   }
   if (state.showVehicleBearing) {
-    lines.splice(3 + (state.showVehicleIds ? 3 : 0), 0, `方位: ${escapeHtml(bearing)}`);
+    const isEstimated = properties.has_bearing === false && properties.estimated_bearing !== null && properties.estimated_bearing !== undefined;
+    const bearingLabel = isEstimated ? `${bearing}（推測）` : bearing;
+    lines.splice(3 + (state.showVehicleIds ? 3 : 0), 0, `方位: ${escapeHtml(bearingLabel)}`);
   }
   return lines.join("<br/>");
 }
@@ -642,6 +646,13 @@ function applyLayerVisibility() {
     map.setLayoutProperty("vehicles-symbol", "text-field", state.showVehicleIds ? ["get", "vehicle_id"] : "");
   }
   if (map.getLayer("vehicles-arrow")) {
+    const rotation = state.showEstimatedBearing
+      ? ["case",
+          ["!", ["coalesce", ["get", "has_bearing"], false]],
+          ["coalesce", ["get", "estimated_bearing"], ["get", "bearing"], 0],
+          ["coalesce", ["get", "bearing"], 0]]
+      : ["coalesce", ["get", "bearing"], 0];
+    map.setLayoutProperty("vehicles-arrow", "icon-rotate", rotation);
     map.setLayoutProperty("vehicles-arrow", "visibility", (state.showVehicles && state.showVehicleArrow) ? "visible" : "none");
   }
   if (map.getLayer("vehicles-circle")) {
@@ -2233,6 +2244,15 @@ function wireActions() {
     showVehicleArrowToggle.checked = state.showVehicleArrow;
     showVehicleArrowToggle.addEventListener("change", () => {
       state.showVehicleArrow = showVehicleArrowToggle.checked;
+      saveUiState();
+      applyLayerVisibility();
+    });
+  }
+  const showEstimatedBearingToggle = document.getElementById("showEstimatedBearingToggle");
+  if (showEstimatedBearingToggle) {
+    showEstimatedBearingToggle.checked = state.showEstimatedBearing;
+    showEstimatedBearingToggle.addEventListener("change", () => {
+      state.showEstimatedBearing = showEstimatedBearingToggle.checked;
       saveUiState();
       applyLayerVisibility();
     });

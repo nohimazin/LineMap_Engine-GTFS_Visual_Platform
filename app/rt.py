@@ -23,6 +23,9 @@ class RealtimeVehicleService:
         self._last_http_status: int | None = None
         self._consecutive_error_count: int = 0
         self._error_history: list[dict[str, Any]] = []
+        # 車両の移動方向推測用: 直近位置と推測方位を保持
+        self._vehicle_prev_pos: dict[str, tuple[float, float]] = {}
+        self._vehicle_estimated_bearing: dict[str, float] = {}
 
     def _record_error(self, message: str, http_status: int | None = None) -> None:
         now_unix = int(time.time())
@@ -50,6 +53,19 @@ class RealtimeVehicleService:
         self._last_http_status = None
         self._consecutive_error_count = 0
 
+    @staticmethod
+    def _compute_heading(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """2点間の移動方向を方位角（度, 0=北, 時計回り）で返す。"""
+        import math
+        dlat = math.radians(lat2 - lat1)
+        dlon = math.radians(lon2 - lon1)
+        lat1r = math.radians(lat1)
+        lat2r = math.radians(lat2)
+        x = math.sin(dlon) * math.cos(lat2r)
+        y = math.cos(lat1r) * math.sin(lat2r) - math.sin(lat1r) * math.cos(lat2r) * math.cos(dlon)
+        bearing = math.degrees(math.atan2(x, y))
+        return (bearing + 360.0) % 360.0
+
     def configure(self, url: str | None, interval_sec: int | None = None, trip_update_url: str | None = None) -> None:
         new_url = url.strip() if url else None
         self._trip_update_url = trip_update_url.strip() if trip_update_url else None
@@ -60,6 +76,8 @@ class RealtimeVehicleService:
             self._last_http_status = None
             self._consecutive_error_count = 0
             self._error_history = []
+            self._vehicle_prev_pos = {}
+            self._vehicle_estimated_bearing = {}
         if interval_sec is not None:
             self._interval_sec = max(5, min(interval_sec, 60))
         self._vehicles = {"type": "FeatureCollection", "features": []}
@@ -115,6 +133,7 @@ class RealtimeVehicleService:
                     trip_delays[trip_id] = delays
 
             features: list[dict[str, Any]] = []
+            current_vehicle_ids: set[str] = set()
             for entity in feed.entity:
                 if not entity.HasField("vehicle"):
                     continue
@@ -140,7 +159,8 @@ class RealtimeVehicleService:
                 if vehicle.HasField("vehicle") and vehicle.vehicle.HasField("label"):
                     vehicle_label = vehicle.vehicle.label
 
-                bearing = vehicle.position.bearing if vehicle.position.HasField("bearing") else 0.0
+                feed_has_bearing = vehicle.position.HasField("bearing")
+                bearing = vehicle.position.bearing if feed_has_bearing else 0.0
                 speed = vehicle.position.speed if vehicle.position.HasField("speed") else 0.0
                 delay_seconds = None
                 delays = trip_delays.get(trip_id)
@@ -150,6 +170,25 @@ class RealtimeVehicleService:
                         delay_seconds = delays[current_stop_sequence]
                     else:
                         delay_seconds = next(iter(delays.values()))
+
+                # 直近の移動方向から方位を推測
+                estimated_bearing: float | None = None
+                track_key = vehicle_id or trip_id
+                if track_key:
+                    current_vehicle_ids.add(track_key)
+                    prev = self._vehicle_prev_pos.get(track_key)
+                    if prev is None:
+                        self._vehicle_prev_pos[track_key] = (lat, lon)
+                        estimated_bearing = self._vehicle_estimated_bearing.get(track_key)
+                    else:
+                        plat, plon = prev
+                        delta_deg = (lat - plat) ** 2 + (lon - plon) ** 2
+                        if delta_deg > 1e-10:
+                            estimated_bearing = self._compute_heading(plat, plon, lat, lon)
+                            self._vehicle_estimated_bearing[track_key] = estimated_bearing
+                            self._vehicle_prev_pos[track_key] = (lat, lon)
+                        else:
+                            estimated_bearing = self._vehicle_estimated_bearing.get(track_key)
 
                 features.append(
                     {
@@ -161,12 +200,18 @@ class RealtimeVehicleService:
                             "trip_id": trip_id,
                             "route_id": route_id,
                             "bearing": bearing,
+                            "has_bearing": feed_has_bearing,
+                            "estimated_bearing": estimated_bearing,
                             "speed": speed,
                             "timestamp": vehicle.timestamp if vehicle.HasField("timestamp") else None,
                             "delay_seconds": delay_seconds,
                         },
                     }
                 )
+
+            # 消えた車両の履歴を整理
+            self._vehicle_prev_pos = {k: v for k, v in self._vehicle_prev_pos.items() if k in current_vehicle_ids}
+            self._vehicle_estimated_bearing = {k: v for k, v in self._vehicle_estimated_bearing.items() if k in current_vehicle_ids}
 
             self._vehicles = {"type": "FeatureCollection", "features": features}
             self._record_success()
