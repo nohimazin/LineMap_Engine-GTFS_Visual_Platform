@@ -1,145 +1,104 @@
-# 停留所検索機能 - 設計ドキュメント
+# 停留所検索機能 - 仕様・設計書
 
-## 概要
+最終更新: 2026-11-01
 
-UI に停留所検索ボックスを追加し、停留所名で検索・フィルタリングして、マップ上の該当停留所に自動ズームできる機能。
+## 1. 概要
 
-## 要件
+本機能は、大量の停留所データ（数千〜数万件）の中からユーザーが目的の停留所を迅速に特定し、地図上でその位置を確認・ズームして運行時刻等の詳細情報を参照できる検索機能です。
 
-### 機能要件
-1. 左パネルに「停留所検索」セクションを追加
-2. 検索ボックスに停留所名を入力
-3. リアルタイムで一致する停留所を絞り込み表示
-4. 検索結果をクリックすると、マップ上の停留所にズーム
-5. 停留所の詳細情報（停留所ID、路線数など）を表示
+---
 
-### 非機能要件
-- 大規模停留所データ（4000+ 件）でも応答性を損なわないこと
-- 路線一覧検索と同じような UI/UX を提供
+## 2. 要件と実装状況
 
-## 実装方針
+| 要件 | 計画時 | 現在の実装状況 |
+|---|---|---|
+| 検索 UI | 左パネルに検索ボックス | 実装済み (`#stopSearchInput`, `#stopSearchList`) |
+| 検索方式 | 停留所名・停留所IDの部分一致 | 実装済み (インクリメンタルリアルタイム検索) |
+| テキスト正規化 | 全角半角・空白・大文字小文字吸収 | 実装済み (`normalizeDisplayText`) |
+| 結果表示 | 最大 30 件の件数制限表示 | 実装済み (超えた場合は「他 N 件」表示) |
+| 地図移動 | 検索結果クリックで該当停留所へズーム | 実装済み (`map.easeTo` + ポップアップ自動オープン) |
+| 長距離路線連携 | 長距離路線のみの停留所除外 | 実装済み (フィルタ設定と連動) |
+| 複数GTFS連携 | データセット名やIDプレフィックス対応 | 実装済み (統合データから検索) |
 
-### フェーズ 1（MVP）
-- [ ] HTML に停留所検索セクションを追加
-- [ ] 停留所一覧コンテナを追加
-- [ ] JavaScript で検索ロジックを実装
-- [ ] 検索結果への UI インタラクション（ズーム）を実装
+---
 
-### フェーズ 2（拡張）
-- [ ] 検索の全文検索化（ローマ字入力対応など）
-- [ ] 最近検索した停留所の記憶
-- [ ] 停留所の絞り込み結果を地図上にハイライト
+## 3. 実装詳細
 
-## 詳細設計
+### 3.1 検索入力と正規化ロジック (`static/app.js`)
 
-### HTML 構造
+ユーザーからの入力値、および停留所プロパティ（`stop_name`, `stop_id`）の双方を同一の正規化関数を通して比較します。
+
+```javascript
+function normalizeDisplayText(text) {
+  return String(text || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .trim();
+}
+```
+
+- **NFKC 正規化**: 全角アルファベット・数字・カナ（一部記号含む）を半角等に統一。
+- **ケースインセンシティブ**: `toLowerCase()` により大文字・小文字を区別せずヒット。
+- **空白トリム**: 前後の余分な空白を除去。
+
+### 3.2 フィルタリングとパフォーマンス配慮
+
+- **対象コレクション**: `state.stops.features`（現在アクティブな全 GTFS の停留所データ）。
+- **長距離便フィルタ連動**:
+  - 設定で「長距離便のみ通過する停留所を非表示」が有効な場合、該当停留所は検索候補からも自動的に除外されます。
+- **件数制限 (Max 30 件)**:
+  - 4,000 件以上の停留所が存在する場合でも、DOM 描画のボトルネックを防ぐため検索結果リストは最大 30 件に制限し、それ以上の件数は件数表示のみを行います。
+
+### 3.3 クリック時のアクション
+
+ユーザーが検索結果リスト内の停留所項目をクリックした際の動作：
+
+1. 停留所の座標（`[lon, lat]`）を取得。
+2. 地図カメラをスムーズに移動：
+   ```javascript
+   map.easeTo({
+     center: coordinates,
+     zoom: 15,
+     duration: 800,
+   });
+   ```
+3. 地図移動後、該当位置の停留所ポップアップを自動的に生成・表示。停留所名、停留所ID、乗り入れ路線一覧、および今日の運行予定時刻を表示します。
+
+---
+
+## 4. UI 構造
+
+### HTML (`static/index.html`)
+
 ```html
 <section class="card">
   <h2>🛑 停留所検索</h2>
-  <input id="stopSearchInput" placeholder="停留所名検索" />
+  <div class="field">
+    <input
+      id="stopSearchInput"
+      type="search"
+      placeholder="停留所名・停留所IDを入力..."
+      autocomplete="off"
+    />
+  </div>
   <div id="stopSearchList" class="stop-search-list"></div>
 </section>
 ```
 
-### JavaScript ロジック
+### CSS スタイル (`static/styles.css`)
 
-#### 1. 検索実行関数
-```javascript
-function performStopSearch(query) {
-  if (!query.trim()) {
-    // 空の場合は全件を表示（オプション）
-    return state.stops.features;
-  }
-  
-  const normalizedQuery = normalizeDisplayText(query);
-  return state.stops.features.filter(feature => {
-    const stopName = normalizeDisplayText(feature.properties.stop_name || "");
-    return stopName.includes(normalizedQuery);
-  });
-}
-```
+- スクロール可能な最大高さを設定（`max-height: 240px`、`overflow-y: auto`）。
+- ホバー時の背景色変更、フォーカスインジケータ。
+- レスポンシブに折り畳み可能なサイドパネル構造。
 
-#### 2. 結果表示関数
-```javascript
-function renderStopSearchResults(results) {
-  const container = document.getElementById("stopSearchList");
-  container.innerHTML = "";
-  
-  results.slice(0, 30).forEach(feature => {
-    const item = document.createElement("div");
-    item.className = "stop-search-item";
-    item.textContent = feature.properties.stop_name;
-    item.addEventListener("click", () => {
-      zoomToStop(feature.geometry.coordinates);
-    });
-    container.appendChild(item);
-  });
-  
-  if (results.length > 30) {
-    const moreInfo = document.createElement("div");
-    moreInfo.textContent = `他 ${results.length - 30} 件`;
-    moreInfo.className = "hint";
-    container.appendChild(moreInfo);
-  }
-}
-```
+---
 
-#### 3. ズーム関数
-```javascript
-function zoomToStop(coordinates) {
-  map.easeTo({
-    center: [coordinates[0], coordinates[1]],
-    zoom: 15,
-    duration: 800,
-  });
-}
-```
+## 5. テストと検証
 
-### CSS スタイル
-```css
-.stop-search-list {
-  max-height: 200px;
-  overflow-y: auto;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  margin-top: 6px;
-}
-
-.stop-search-item {
-  padding: 6px 8px;
-  border-bottom: 1px solid #eee;
-  cursor: pointer;
-  user-select: none;
-}
-
-.stop-search-item:hover {
-  background-color: #f0f0f0;
-}
-
-.stop-search-item:last-child {
-  border-bottom: none;
-}
-```
-
-### イベント連携
-- 入力欄に `input` イベントリスナーを設定
-- リアルタイムで `performStopSearch()` を呼び出し
-- 結果を `renderStopSearchResults()` で表示
-
-## 優先度
-
-- **MVP**: 検索ボックス + 基本的なフィルタリング + ズーム
-- **拡張**: 全文検索、ハイライト表示
-
-## 制限事項
-
-- 現在は最大 30 件の結果を表示（パフォーマンス考慮）
-- ローマ字対応は Phase 2 以降
-
-## テスト項目
-
-1. 1文字入力で部分一致フィルタリング
-2. 大文字小文字区別なし
-3. 空白含みの入力（「central station」）
-4. 全角・半角混在
-5. 検索結果が 0 件の場合
+- **ブラウザ手動検証用ページ**: `tests/test_stop_search.html`
+  - 地図描画とは独立して、停留所検索ロジックと結果レンダリングの動作検証が可能です。
+- **テストケース**:
+  - 空白文字入力時の挙動
+  - 全角カナ／半角カナ入力でのマッチング
+  - 存在しないキーワード入力時の「該当なし」メッセージ
+  - 30件超過時の表示

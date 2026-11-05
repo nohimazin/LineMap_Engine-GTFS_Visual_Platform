@@ -12,7 +12,7 @@
       rel="stylesheet"
     />
     <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=20261018c" />
+    <link rel="stylesheet" href="/static/styles.css?v=20261104-webgl-warning" />
   </head>
   <body>
     <div class="background-pattern" aria-hidden="true"></div>
@@ -33,11 +33,10 @@
 
         <section class="card dataset-card">
           <div class="card-header">
-            <h2>📁 データセット</h2>
-            <span id="gtfsSelectResult" class="hint"></span>
+            <h2>📁 GTFSデータセット</h2>
           </div>
           <button id="openDatasetSettingsBtn" class="settings-open-button" type="button">GTFS / GTFS-RT設定を開く</button>
-          <p class="hint">GTFSとリアルタイム車両情報をまとめて設定・保存します。</p>
+          <p class="hint">複数のGTFSとリアルタイム車両情報を設定・保存します。</p>
           <p id="rtStatus" class="hint"></p>
           <pre id="rtErrorDetails" class="hint" style="white-space: pre-wrap; font-family: inherit; margin-top:6px;"></pre>
         </section>
@@ -56,6 +55,14 @@
             <input id="stopSearchInput" placeholder="停留所名検索" />
           </div>
           <div id="stopSearchList" class="stop-search-list"></div>
+        </section>
+
+        <section class="card grow">
+          <div class="card-header">
+            <h2>🚌 走行中のバス検索</h2>
+            <input id="vehicleSearchInput" placeholder="車両番号・路線名検索" />
+          </div>
+          <div id="vehicleSearchList" class="stop-search-list"></div>
         </section>
 
         <section class="card card-group">
@@ -133,6 +140,19 @@
               <span>方位を表示する</span>
             </label>
           </div>
+          <div class="card-subsection">
+            <h3>車両マーカー</h3>
+            <label class="checkbox-row">
+              <input id="showVehicleArrowToggle" type="checkbox" />
+              <span>進行方向の矢印を表示する</span>
+            </label>
+            <label class="checkbox-row">
+              <input id="showEstimatedBearingToggle" type="checkbox" />
+              <span>方位が無い場合、移動方向から推測して表示する</span>
+            </label>
+            <p class="hint">GTFS-RTのbearing（方位）情報を提供している事業者のみ矢印が正しく表示されます。提供していない事業者では矢印が上向き（北）固定になるため、不要な場合はオフにできます。</p>
+            <p class="hint">推測表示: GTFS-RTがbearingを提供していない車両について、直近の位置変化から移動方向（方位角）を推測して矢印の向きに使用します。位置はHaversine式でメートル換算し、累積移動距離が1mを超えた時点で方位を更新します（低速でも蓄積すれば計算）。90秒より古い測位データや異常な速度（200km/h超）は除外します。GTFS-RTがbearingを提供している場合はそちらを優先し、どちらも無い場合は矢印を非表示にして円形マーカーを表示します。車両が動いていない場合は前回の推測値を保持します。</p>
+          </div>
         </section>
 
         <section class="card">
@@ -153,6 +173,13 @@
 
       <main class="map-area">
         <div id="map"></div>
+        <div id="webglWarning" class="webgl-warning is-hidden" role="alert" aria-live="assertive">
+          <h2>WebGLがサポートされていません</h2>
+          <p>このサイトの地図表示にはWebGLが必要です。WebGLを有効にした最新のブラウザ（Chrome / Edge / Firefox / Safari など）でアクセスしてください。ハードウェアアクセラレーションが無効になっている場合はブラウザ設定で有効にしてください。</p>
+        </div>
+        <button id="toggleMapFullscreenBtn" class="map-fullscreen-button" type="button" aria-label="地図を全画面表示">
+          全画面
+        </button>
       </main>
     </div>
 
@@ -167,26 +194,32 @@
         </div>
 
         <div class="settings-dialog-body">
-          <section class="settings-section">
+          <section id="gtfsListSection" class="settings-section">
             <h3>GTFSデータ</h3>
-            <label for="gtfsSelect">使用するGTFS</label>
-            <select id="gtfsSelect">
-              <option value="default">デフォルト</option>
-            </select>
-            <button id="deleteGtfsBtn" class="danger-button" type="button">選択中のGTFSを削除</button>
+            <p class="hint">表示するGTFSにチェックを入れてください。</p>
+            <div id="gtfsList" class="gtfs-list" role="group" aria-label="使用するGTFS"></div>
             <button id="openGtfsUploadBtn" class="secondary-button" type="button">新規GTFSをアップロード</button>
           </section>
-
-          <section class="settings-section">
+          <section id="gtfsDetailSection" class="settings-section is-hidden">
+            <div class="settings-section-heading">
+              <h3 id="gtfsDetailTitle">GTFS個別設定</h3>
+              <button id="backToGtfsListBtn" class="secondary-button" type="button">GTFS一覧に戻る</button>
+            </div>
+            <button id="openGtfsOverwriteBtn" class="secondary-button" type="button">このGTFSを上書きアップロード</button>
+            <button id="deleteGtfsBtn" class="danger-button" type="button">このGTFSを削除</button>
             <h3>GTFS-RT車両情報</h3>
             <label for="rtUrlInput">Vehicle Positions URL</label>
             <input id="rtUrlInput" type="url" placeholder="https://example.com/vehiclePositions.pb" />
+            <label for="tripUpdateUrlInput">TripUpdate URL</label>
+            <input id="tripUpdateUrlInput" type="url" placeholder="https://example.com/tripUpdates.pb" />
             <label for="rtIntervalInput">更新間隔</label>
             <div class="inline-controls rt-interval-row">
               <input id="rtIntervalInput" type="number" min="5" max="60" value="10" />
               <span>秒</span>
             </div>
-            <p class="hint">空欄で保存するとGTFS-RTを停止します。</p>
+            <label for="rtVehicleColorInput">車両・事業者表示色</label>
+            <input id="rtVehicleColorInput" class="vehicle-color-input" type="color" value="#e4572e" />
+            <p class="hint">車両マーカーと車両ポップアップの事業者名に使用する色を選択します。</p>
           </section>
           <p id="datasetSettingsResult" class="hint" role="status"></p>
           <div id="gtfsLoadProgressWrap" class="load-progress is-hidden" aria-live="polite">
@@ -196,8 +229,8 @@
         </div>
 
         <div class="settings-dialog-actions">
-          <button id="cancelDatasetSettingsBtn" class="secondary-button" type="button">キャンセル</button>
-          <button id="saveDatasetSettingsBtn" type="button">まとめて保存</button>
+          <button id="cancelDatasetSettingsBtn" class="secondary-button" type="button">保存して閉じる</button>
+          <button id="saveDatasetSettingsBtn" type="button">このGTFSの設定を保存</button>
         </div>
       </form>
     </dialog>
@@ -218,18 +251,22 @@
             <input id="gtfsIdInput" placeholder="GTFS ID（例: city-a）" value="default" />
             <label for="gtfsZipInput">GTFS ZIPファイル</label>
             <input type="file" id="gtfsZipInput" accept=".zip" />
-            <p class="hint">アップロード後、このGTFSが使用対象になります。</p>
+            <p class="hint">アップロード後、このGTFSが表示対象に追加されます。GTFS-RT URLを指定した場合は直ちに取得を開始します。</p>
           </section>
           <section class="settings-section">
             <h3>GTFS-RT車両情報（任意）</h3>
             <label for="gtfsUploadRtUrlInput">Vehicle Positions URL</label>
             <input id="gtfsUploadRtUrlInput" type="url" placeholder="未設定でも保存できます" />
+            <label for="gtfsUploadTripUpdateUrlInput">TripUpdate URL</label>
+            <input id="gtfsUploadTripUpdateUrlInput" type="url" placeholder="遅延情報を使う場合に指定" />
             <label for="gtfsUploadRtIntervalInput">更新間隔</label>
             <div class="inline-controls rt-interval-row">
               <input id="gtfsUploadRtIntervalInput" type="number" min="5" max="60" value="10" />
               <span>秒</span>
             </div>
-            <p class="hint">URLを空欄にするとGTFS-RTを停止した状態で保存します。</p>
+            <label for="gtfsUploadVehicleColorInput">車両・事業者表示色</label>
+            <input id="gtfsUploadVehicleColorInput" class="vehicle-color-input" type="color" value="#e4572e" />
+            <p class="hint">車両マーカーと車両ポップアップの事業者名に使用する色を選択します。URLを空欄にするとGTFS-RTなしで保存します。</p>
           </section>
           <p id="gtfsUploadResult" class="hint" role="status"></p>
           <div id="gtfsUploadProgressWrap" class="load-progress is-hidden" aria-live="polite">
@@ -246,6 +283,6 @@
 
     <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
     <script src="/static/performance-monitor.js?v=20260502f"></script>
-    <script src="/static/app.js?v=20261101-long-route-filter-v2"></script>
+    <script src="/static/app.js?v=20261104-webgl-warning"></script>
   </body>
 </html>

@@ -1,6 +1,8 @@
 import asyncio
+import base64
 import zipfile
 from contextlib import asynccontextmanager, suppress
+from datetime import date
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
@@ -17,33 +19,76 @@ from app.storage import DataStore
 class DatasetSettingsRequest(BaseModel):
     gtfs_id: str = "default"
     gtfs_rt_url: HttpUrl | None = None
+    gtfs_trip_update_url: HttpUrl | None = None
     interval_sec: int = 10
+    vehicle_color: str = "#e4572e"
+
+
+class ActiveDatasetsRequest(BaseModel):
+    gtfs_ids: list[str]
 
 
 store = DataStore()
-rt_service = RealtimeVehicleService()
+rt_services: dict[str, RealtimeVehicleService] = {}
+rt_tasks: dict[str, asyncio.Task] = {}
 
 static_dir = Path(__file__).resolve().parent.parent / "static"
 
 
+def _refresh_service_data_if_needed() -> None:
+    today = date.today().isoformat()
+    for gid in store.active_gtfs_ids():
+        data = store.gtfs_data(gid)
+        if data["service_date"] == today:
+            continue
+        parsed = parse_gtfs_zip(base64.b64decode(data["source_zip_base64"]))
+        config = data["gtfs_rt_config"]
+        store.update_gtfs(
+            routes_geojson=parsed["routes_geojson"],
+            stops_geojson=parsed["stops_geojson"],
+            stop_connections_geojson=parsed["stop_connections_geojson"],
+            trip_to_route=parsed["trip_to_route"],
+            route_catalog=parsed["route_catalog"],
+            agency_name=parsed["agency_name"],
+            gtfs_rt_url=config["gtfs_rt_url"],
+            gtfs_trip_update_url=config["gtfs_trip_update_url"],
+            interval_sec=config["interval_sec"],
+            vehicle_color=config["vehicle_color"],
+            gtfs_id=gid,
+            service_date=parsed["service_date"],
+            source_zip_base64=data["source_zip_base64"],
+        )
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    saved_rt_config = store.gtfs_rt_config()
-    rt_service.configure(saved_rt_config.get("gtfs_rt_url"), saved_rt_config.get("interval_sec", 10))
-    polling_task = asyncio.create_task(rt_service.polling_loop(store.trip_to_route))
+    for item in store.list_gtfs():
+        gid = item["gtfs_id"]
+        data = store.gtfs_data(gid)
+        config = data["gtfs_rt_config"]
+        service = RealtimeVehicleService()
+        service.configure(config["gtfs_rt_url"], config["interval_sec"], config["gtfs_trip_update_url"])
+        rt_services[gid] = service
+        rt_tasks[gid] = asyncio.create_task(
+            service.polling_loop(lambda gid=gid: store.gtfs_data(gid)["trip_to_route"])
+        )
     try:
         yield
     finally:
-        polling_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await polling_task
+        for task in rt_tasks.values():
+            task.cancel()
+        for task in list(rt_tasks.values()):
+            with suppress(asyncio.CancelledError):
+                await task
+        rt_services.clear()
+        rt_tasks.clear()
 
 
 app = FastAPI(title="LineMap Engine GTFS Visual Platform", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -62,6 +107,14 @@ async def disable_cache_for_web_assets(request, call_next):
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
+def _namespace_vehicle_route_id(route_id: str, gtfs_id: str) -> str:
+    """Keep realtime route IDs consistent with IDs returned by active_map_data."""
+    route_id = str(route_id or "")
+    if not route_id or route_id.startswith(f"{gtfs_id}:"):
+        return route_id
+    return f"{gtfs_id}:{route_id}"
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(static_dir / "index.html")
@@ -77,9 +130,11 @@ async def upload_gtfs(
     file: UploadFile = File(...),
     gtfs_id: str = Query("default"),
     gtfs_rt_url: HttpUrl | None = Query(None),
+    gtfs_trip_update_url: HttpUrl | None = Query(None),
     interval_sec: int = Query(10, ge=5, le=60),
+    vehicle_color: str = Query("#e4572e"),
 ) -> dict[str, int | str]:
-    if not file.filename.lower().endswith(".zip"):
+    if not file.filename or not file.filename.lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="GTFS ZIPファイルを指定してください。")
 
     raw_zip = await file.read()
@@ -97,11 +152,24 @@ async def upload_gtfs(
         route_catalog=parsed["route_catalog"],
         agency_name=parsed["agency_name"],
         gtfs_rt_url=str(gtfs_rt_url) if gtfs_rt_url else None,
+        gtfs_trip_update_url=str(gtfs_trip_update_url) if gtfs_trip_update_url else None,
         interval_sec=interval_sec,
+        vehicle_color=vehicle_color,
         gtfs_id=gtfs_id,
+        service_date=parsed["service_date"],
+        source_zip_base64=base64.b64encode(raw_zip).decode("ascii"),
     )
-    saved_rt_config = store.gtfs_rt_config()
-    rt_service.configure(saved_rt_config.get("gtfs_rt_url"), saved_rt_config.get("interval_sec", 10))
+    config = store.gtfs_data(gtfs_id)["gtfs_rt_config"]
+    service = rt_services.setdefault(gtfs_id, RealtimeVehicleService())
+    service.configure(config["gtfs_rt_url"], config["interval_sec"], config["gtfs_trip_update_url"])
+    if config["gtfs_rt_url"]:
+        await service.fetch_once(parsed["trip_to_route"])
+
+    if gtfs_id in rt_tasks:
+        rt_tasks[gtfs_id].cancel()
+    rt_tasks[gtfs_id] = asyncio.create_task(
+        service.polling_loop(lambda gid=gtfs_id: store.gtfs_data(gid)["trip_to_route"])
+    )
 
     return {
         "message": "GTFSを登録しました。",
@@ -114,34 +182,67 @@ async def upload_gtfs(
 
 @app.get("/routes")
 def routes() -> dict:
-    return store.routes_geojson()
+    _refresh_service_data_if_needed()
+    return store.active_map_data()["routes"]
 
 
 @app.get("/route_catalog")
 def route_catalog() -> list[dict]:
-    return store.route_catalog()
+    _refresh_service_data_if_needed()
+    return store.active_map_data()["route_catalog"]
 
 
 @app.get("/stops")
 def stops() -> dict:
-    return store.stops_geojson()
+    _refresh_service_data_if_needed()
+    return store.active_map_data()["stops"]
 
 
 @app.get("/stop_connections")
 def stop_connections() -> dict:
-    return store.stop_connections_geojson()
+    _refresh_service_data_if_needed()
+    return store.active_map_data()["stop_connections"]
 
 
 @app.get("/agency")
 def agency() -> dict[str, str]:
-    return {"agency_name": store.agency_name()}
+    _refresh_service_data_if_needed()
+    names = [
+        store.gtfs_data(gtfs_id)["agency_name"]
+        for gtfs_id in store.active_gtfs_ids()
+    ]
+    return {"agency_name": " / ".join(name for name in names if name)}
 
 
 @app.get("/vehicles")
 def vehicles() -> dict:
+    features = []
+    statuses = {}
+    for gid in store.active_gtfs_ids():
+        service = rt_services.get(gid)
+        if not service:
+            continue
+        data = store.gtfs_data(gid)
+        color = data["gtfs_rt_config"]["vehicle_color"]
+        agency_name = data["agency_name"]
+        for feature in service.vehicles()["features"]:
+            feature = dict(feature)
+            properties = {
+                **feature.get("properties", {}),
+                "dataset_id": gid,
+                "vehicle_color": color,
+                "vehicle_agency_name": agency_name,
+            }
+            if properties.get("vehicle_id"):
+                properties["vehicle_id"] = f"{gid}:{properties['vehicle_id']}"
+            if properties.get("route_id"):
+                properties["route_id"] = _namespace_vehicle_route_id(properties["route_id"], gid)
+            feature["properties"] = properties
+            features.append(feature)
+        statuses[gid] = service.status()
     return {
-        "vehicles": rt_service.vehicles(),
-        "status": rt_service.status(),
+        "vehicles": {"type": "FeatureCollection", "features": features},
+        "status": statuses,
     }
 
 
@@ -150,26 +251,13 @@ def gtfs_list() -> dict:
     return {"gtfs_list": store.list_gtfs()}
 
 
-@app.post("/gtfs/select")
-async def select_gtfs(gtfs_id: str) -> dict:
-    if store.select_gtfs(gtfs_id):
-        selected_rt_config = store.gtfs_rt_config()
-        rt_service.configure(selected_rt_config.get("gtfs_rt_url"), selected_rt_config.get("interval_sec", 10))
-        if selected_rt_config.get("gtfs_rt_url"):
-            await rt_service.fetch_once(store.trip_to_route())
-        return {
-            "message": f"GTFS {gtfs_id} を選択しました",
-            "current": gtfs_id,
-            "list": store.list_gtfs(),
-            "rt_config": selected_rt_config,
-            "status": rt_service.status(),
-        }
-    raise HTTPException(status_code=404, detail=f"GTFS {gtfs_id} が見つかりません")
-
-
 @app.delete("/gtfs/delete")
-def delete_gtfs(gtfs_id: str) -> dict:
+async def delete_gtfs(gtfs_id: str) -> dict:
     if store.delete_gtfs(gtfs_id):
+        task = rt_tasks.pop(gtfs_id, None)
+        if task:
+            task.cancel()
+        rt_services.pop(gtfs_id, None)
         return {
             "message": f"GTFS {gtfs_id} を削除しました",
             "list": store.list_gtfs(),
@@ -177,20 +265,42 @@ def delete_gtfs(gtfs_id: str) -> dict:
     raise HTTPException(status_code=404, detail=f"GTFS {gtfs_id} が見つかりません")
 
 
+@app.post("/gtfs/active")
+def active_gtfs(payload: ActiveDatasetsRequest) -> dict:
+    try:
+        store.set_active_gtfs_ids(payload.gtfs_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"active_gtfs_ids": store.active_gtfs_ids()}
+
+
 @app.post("/settings/dataset")
 async def update_dataset_settings(payload: DatasetSettingsRequest) -> dict:
-    if not store.select_gtfs(payload.gtfs_id):
+    data = store.gtfs_data(payload.gtfs_id)
+    if data is None:
         raise HTTPException(status_code=404, detail=f"GTFS {payload.gtfs_id} が見つかりません")
 
-    rt_service.configure(str(payload.gtfs_rt_url) if payload.gtfs_rt_url else None, payload.interval_sec)
-    status = rt_service.status()
-    store.update_gtfs_rt_config(status["url"], status["interval_sec"])
+    service = rt_services.setdefault(payload.gtfs_id, RealtimeVehicleService())
+    service.configure(
+        str(payload.gtfs_rt_url) if payload.gtfs_rt_url else None,
+        payload.interval_sec,
+        str(payload.gtfs_trip_update_url) if payload.gtfs_trip_update_url else None,
+    )
+    status = service.status()
+    store.update_gtfs_rt_config(
+        payload.gtfs_id,
+        status["url"],
+        status["interval_sec"],
+        payload.vehicle_color,
+        str(payload.gtfs_trip_update_url) if payload.gtfs_trip_update_url else None,
+    )
     if payload.gtfs_rt_url:
-        await rt_service.fetch_once(store.trip_to_route())
+        await service.fetch_once(data["trip_to_route"])
+    status["vehicle_color"] = payload.vehicle_color
     return {
         "message": "GTFSとGTFS-RT設定を保存しました。",
         "gtfs_id": payload.gtfs_id,
-        "status": rt_service.status(),
+        "status": {**service.status(), "vehicle_color": payload.vehicle_color},
     }
 
 
@@ -200,10 +310,10 @@ if __name__ == "__main__":
     app_dir = Path(__file__).resolve().parent
     project_dir = app_dir.parent
     uvicorn.run(
-        "main:app",
+        "app.main:app",
         host="127.0.0.1",
         port=8000,
         reload=True,
-        app_dir=str(app_dir),
+        app_dir=str(project_dir),
         reload_dirs=[str(project_dir)],
     )

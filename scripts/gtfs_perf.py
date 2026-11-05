@@ -61,15 +61,15 @@ def main():
         sys.exit(2)
 
     results = []
-    for i in range(args.runs):
+    for i in range(max(1, args.runs)):
         print(f"Run {i+1}/{args.runs}...")
         stats = run_once(args.input_path)
         print(f"  elapsed: {stats['elapsed_sec']:.3f}s, routes={stats['routes']}, stops={stats['stops']}, stop_connections={stats['stop_connections']}")
         results.append(stats)
 
-    avg = sum(r["elapsed_sec"] for r in results) / len(results)
+    avg = sum(r["elapsed_sec"] for r in results) / max(1, len(results))
     print("\nSummary:")
-    print(f"  runs: {len(results)}")
+    print(f"  runs: {max(1, len(results))}")
     print(f"  avg elapsed: {avg:.3f}s")
 
 

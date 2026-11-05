@@ -34,41 +34,57 @@ function resolveInitialStyle(styleUrl) {
   return BASEMAP_STYLES.bright;
 }
 
-async function retryRtConnection() {
-  const url = document.getElementById("rtUrlInput").value.trim();
-  const interval = Number(document.getElementById("rtIntervalInput").value || "10");
+const initialStyle = resolveInitialStyle(savedState.baseMapStyle);
 
+function isWebGLSupported() {
   try {
-    setRtStatus("再接続を試行しています...", "neutral");
-    // 再設定を投げてサービス側で再接続を促す
-    await api("/settings/gtfs_rt", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ gtfs_rt_url: url || null, interval_sec: interval }),
-    });
-
-    // 現在の状態を即座に取得して反映
-    const payload = await api("/vehicles");
-    renderRtStatus(payload.status);
-  } catch (err) {
-    setRtStatus(`再接続失敗: ${err.message}`, "error");
-    if (rtErrorDetails) rtErrorDetails.textContent = String(err.message || "");
+    if (typeof maplibregl !== "undefined" && typeof maplibregl.supported === "function") {
+      return !!maplibregl.supported();
+    }
+    const canvas = document.createElement("canvas");
+    return !!(
+      canvas.getContext("webgl2") ||
+      canvas.getContext("webgl") ||
+      canvas.getContext("experimental-webgl")
+    );
+  } catch (error) {
+    console.warn("WebGLサポート判定に失敗しました", error);
+    return false;
   }
 }
 
-const initialStyle = resolveInitialStyle(savedState.baseMapStyle);
+function showWebGLWarning() {
+  const warning = document.getElementById("webglWarning");
+  if (warning) warning.classList.remove("is-hidden");
+  const mapEl = document.getElementById("map");
+  if (mapEl) mapEl.style.display = "none";
+}
 
-const map = new maplibregl.Map({
-  container: "map",
-  style: initialStyle,
-  center: savedView?.center || [139.767, 35.681],
-  zoom: savedView?.zoom || 11,
-  fadeDuration: 0,
-  renderWorldCopies: false,
-});
+if (!isWebGLSupported()) {
+  showWebGLWarning();
+  throw new Error("WebGL is not supported by this browser.");
+}
+
+let map;
+try {
+  map = new maplibregl.Map({
+    container: "map",
+    style: initialStyle,
+    center: savedView?.center || [139.767, 35.681],
+    zoom: savedView?.zoom || 11,
+    fadeDuration: 0,
+    renderWorldCopies: false,
+    preserveDrawingBuffer: true,
+  });
+} catch (error) {
+  console.error("地図の初期化に失敗しました", error);
+  showWebGLWarning();
+  throw error;
+}
 
 map.addControl(new maplibregl.NavigationControl(), "top-right");
 window.__linemapMap = map;
+window.map = map;
 
 const state = {
   rawRoutes: { type: "FeatureCollection", features: [] },
@@ -86,7 +102,7 @@ const state = {
   routeToGroup: {},
   groupToRoutes: {},
   visibleRouteIds: new Set(savedState.visibleRouteIds || []),
-  visibleRawRouteIds: new Set(savedState.visibleRawRouteIds || savedState.visibleRouteIds || []),
+  visibleRawRouteIds: new Set(savedState.visibleRawRouteIds || []),
   showStops: savedState.showStops ?? true,
   showStopConnections: savedState.showStopConnections ?? false,
   showTodayStopConnections: savedState.showTodayStopConnections ?? false,
@@ -101,23 +117,28 @@ const state = {
   showStopTimeSeconds: savedState.showStopTimeSeconds ?? false,
   showVehicleIds: savedState.showVehicleIds ?? false,
   showVehicleBearing: savedState.showVehicleBearing ?? false,
+  showVehicleArrow: savedState.showVehicleArrow ?? true,
+  showEstimatedBearing: savedState.showEstimatedBearing ?? false,
   mergeRoundTrip: savedState.mergeRoundTrip ?? false,
   mergeColorSide: savedState.mergeColorSide || "first",
   stopConnectionsLineWidth: savedState.stopConnectionsLineWidth ?? 2.5,
   baseMapStyle: initialStyle,
+  gtfsAgencies: {},
 };
 
 const routeList = document.getElementById("routeList");
 const routeSearchInput = document.getElementById("routeSearchInput");
 const stopSearchInput = document.getElementById("stopSearchInput");
 const stopSearchList = document.getElementById("stopSearchList");
+const vehicleSearchInput = document.getElementById("vehicleSearchInput");
+const vehicleSearchList = document.getElementById("vehicleSearchList");
 const datasetSettingsResult = document.getElementById("datasetSettingsResult");
 const gtfsLoadProgressWrap = document.getElementById("gtfsLoadProgressWrap");
 const gtfsLoadProgressBar = document.getElementById("gtfsLoadProgressBar");
 const gtfsLoadProgressText = document.getElementById("gtfsLoadProgressText");
 const rtStatus = document.getElementById("rtStatus");
 const rtErrorDetails = document.getElementById("rtErrorDetails");
-const gtfsSelect = document.getElementById("gtfsSelect");
+const gtfsList = document.getElementById("gtfsList");
 const gtfsSelectResult = document.getElementById("gtfsSelectResult");
 const appVersion = document.getElementById("appVersion");
 const mapStyleSelect = document.getElementById("mapStyleSelect");
@@ -136,11 +157,18 @@ const hideLongRouteVehiclesToggle = document.getElementById("hideLongRouteVehicl
 const toggleStopsBtn = document.getElementById("toggleStopsBtn");
 const toggleVehiclesBtn = document.getElementById("toggleVehiclesBtn");
 const toggleStopConnectionsBtn = document.getElementById("toggleStopConnectionsBtn");
+const toggleMapFullscreenBtn = document.getElementById("toggleMapFullscreenBtn");
 const datasetSettingsDialog = document.getElementById("datasetSettingsDialog");
 const openDatasetSettingsBtn = document.getElementById("openDatasetSettingsBtn");
 const closeDatasetSettingsBtn = document.getElementById("closeDatasetSettingsBtn");
 const cancelDatasetSettingsBtn = document.getElementById("cancelDatasetSettingsBtn");
 const saveDatasetSettingsBtn = document.getElementById("saveDatasetSettingsBtn");
+const backToGtfsListBtn = document.getElementById("backToGtfsListBtn");
+const gtfsDetailSection = document.getElementById("gtfsDetailSection");
+const gtfsDetailTitle = document.getElementById("gtfsDetailTitle");
+const openGtfsOverwriteBtn = document.getElementById("openGtfsOverwriteBtn");
+let gtfsDetailRequestToken = 0;
+const gtfsListSection = document.getElementById("gtfsListSection");
 const deleteGtfsBtn = document.getElementById("deleteGtfsBtn");
 const gtfsUploadDialog = document.getElementById("gtfsUploadDialog");
 const openGtfsUploadBtn = document.getElementById("openGtfsUploadBtn");
@@ -154,6 +182,7 @@ const gtfsUploadProgressText = document.getElementById("gtfsUploadProgressText")
 let debugOverlay = null;
 const vehicleMarkers = new Map();
 const debugEnabled = new URLSearchParams(window.location.search).get("debug") === "1";
+let loadedServiceDate = new Date().toDateString();
 
 if (appVersion) {
   appVersion.textContent = `Version: ${UI_BUILD_VERSION}`;
@@ -249,11 +278,60 @@ function setGtfsLoadProgress(percent, message, detail = "") {
   gtfsLoadProgressText.textContent = detail ? `${message} ${detail}` : message;
 }
 
+function normalizeRtStatus(status) {
+  if (!status || status.url !== undefined || status.last_error !== undefined) {
+    return status || {};
+  }
+  const entries = Object.entries(status);
+  const selected = entries.find(([, value]) => value?.last_error) || entries[0];
+  if (!selected) return {};
+  return { ...selected[1], dataset_id: selected[0], active_count: entries.length };
+}
+
 function renderRtStatus(status) {
+  const statusEntries = status && status.url === undefined && status.last_error === undefined
+    ? Object.entries(status)
+    : null;
+  if (statusEntries) {
+    if (statusEntries.length === 0) {
+      setRtStatus("RT更新: 接続設定なし", "neutral");
+      if (rtErrorDetails) rtErrorDetails.textContent = "";
+      return;
+    }
+
+    const messages = statusEntries.map(([datasetId, datasetStatus]) => {
+      const agencyName = state.gtfsAgencies[datasetId] || datasetId;
+      const lastUpdateText = formatRtLastUpdate(datasetStatus?.last_update_unix);
+      const lastSuccessText = formatRtLastUpdate(datasetStatus?.last_success_unix);
+      const intervalText = datasetStatus?.interval_sec ? `${datasetStatus.interval_sec}秒間隔` : "間隔未設定";
+      const urlText = datasetStatus?.url ? "接続設定あり" : "未設定";
+      const vehicleCountText = `車両 ${datasetStatus?.vehicle_count ?? 0}台`;
+      const retryText = datasetStatus?.consecutive_error_count
+        ? ` / 連続失敗 ${datasetStatus.consecutive_error_count}回`
+        : "";
+      const httpText = datasetStatus?.last_http_status ? ` / HTTP ${datasetStatus.last_http_status}` : "";
+      if (datasetStatus?.last_error) {
+        return `RT Error [${agencyName}]: ${datasetStatus.last_error}${retryText}${httpText}`;
+      }
+      return `RT更新 [${agencyName}]: ${lastUpdateText} / 成功: ${lastSuccessText} / ${vehicleCountText} / ${intervalText} / ${urlText}${retryText}${httpText}`;
+    });
+    const hasError = statusEntries.some(([, datasetStatus]) => datasetStatus?.last_error);
+    setRtStatus(messages.join("\n"), hasError ? "error" : "ok");
+    if (rtErrorDetails) {
+      rtErrorDetails.textContent = statusEntries
+        .filter(([, datasetStatus]) => datasetStatus?.last_error)
+        .map(([datasetId, datasetStatus]) => `[${state.gtfsAgencies[datasetId] || datasetId}] ${formatRtErrorHistory(datasetStatus)}`)
+        .join("\n\n");
+    }
+    return;
+  }
+
+  status = normalizeRtStatus(status);
   if (status?.last_error) {
     const retryText = status?.consecutive_error_count ? ` / 連続失敗 ${status.consecutive_error_count}回` : "";
     const httpText = status?.last_http_status ? ` / HTTP ${status.last_http_status}` : "";
-    setRtStatus(`RT Error: ${status.last_error}${retryText}${httpText}`, "error");
+    const datasetText = status.dataset_id ? ` [${status.dataset_id}]` : "";
+    setRtStatus(`RT Error${datasetText}: ${status.last_error}${retryText}${httpText}`, "error");
     if (rtErrorDetails) {
       rtErrorDetails.textContent = formatRtErrorHistory(status) || String(status.last_error || "");
     }
@@ -267,7 +345,8 @@ function renderRtStatus(status) {
   const vehicleCountText = `車両 ${status?.vehicle_count ?? 0}台`;
   const retryText = status?.consecutive_error_count ? ` / 連続失敗 ${status.consecutive_error_count}回` : "";
   const httpText = status?.last_http_status ? ` / HTTP ${status.last_http_status}` : "";
-  setRtStatus(`RT更新: ${lastUpdateText} / 成功: ${lastSuccessText} / ${vehicleCountText} / ${intervalText} / ${urlText}${retryText}${httpText}`, status?.url ? "ok" : "neutral");
+  const datasetText = status.dataset_id ? ` [${status.dataset_id}]` : "";
+  setRtStatus(`RT更新${datasetText}: ${lastUpdateText} / 成功: ${lastSuccessText} / ${vehicleCountText} / ${intervalText} / ${urlText}${retryText}${httpText}`, status?.url ? "ok" : "neutral");
   if (rtErrorDetails) rtErrorDetails.textContent = formatRtErrorHistory(status);
 }
 
@@ -291,6 +370,8 @@ function saveUiState() {
       showStopTimeSeconds: state.showStopTimeSeconds,
       showVehicleIds: state.showVehicleIds,
       showVehicleBearing: state.showVehicleBearing,
+      showVehicleArrow: state.showVehicleArrow,
+      showEstimatedBearing: state.showEstimatedBearing,
       mergeRoundTrip: state.mergeRoundTrip,
       mergeColorSide: state.mergeColorSide,
       stopConnectionsLineWidth: state.stopConnectionsLineWidth,
@@ -346,8 +427,8 @@ function createVehicleArrowIcon() {
   ctx.clearRect(0, 0, size, size);
   
   // 矢印を描画（上向き）
-  ctx.fillStyle = '#dd5c23';
-  ctx.strokeStyle = '#fff4de';
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#ffffff';
   ctx.lineWidth = 2;
   ctx.lineJoin = 'round';
   
@@ -393,29 +474,52 @@ function syncSourcesData() {
   syncVehicleMarkers();
 }
 
+function getVehicleDisplayColor(value) {
+  const color = normalizeDisplayText(value);
+  return /^#[0-9a-f]{6}$/i.test(color) ? color : "#e4572e";
+}
+
 function buildVehiclePopupHtml(properties = {}) {
   const vehicleId = normalizeDisplayText(properties.vehicle_id) || "不明";
   const vehicleLabel = normalizeDisplayText(properties.vehicle_label) || vehicleId;
   const tripId = normalizeDisplayText(properties.trip_id) || "不明";
   const routeId = normalizeDisplayText(properties.route_id);
   const routeName = getRouteDisplayLabel(routeId) || "不明";
+  const agencyName = normalizeDisplayText(properties.vehicle_agency_name);
+  const vehicleColor = getVehicleDisplayColor(properties.vehicle_color);
   const bearingValue = Number(properties.bearing);
+  const estimatedBearingValue = properties.estimated_bearing !== null && properties.estimated_bearing !== undefined
+    ? Number(properties.estimated_bearing) : null;
+  const hasBearing = properties.has_bearing === true;
+  const showEstimate = state.showEstimatedBearing;
+  const hasDirection = hasBearing || (showEstimate && estimatedBearingValue !== null);
   const speedValue = Number(properties.speed);
-  const bearing = Number.isFinite(bearingValue) ? `${bearingValue.toFixed(1)}°` : "不明";
+  const bearing = hasBearing
+    ? (Number.isFinite(bearingValue) ? `${bearingValue.toFixed(1)}°` : "不明")
+    : (showEstimate && estimatedBearingValue !== null
+        ? `${estimatedBearingValue.toFixed(1)}°（推測）`
+        : "不明");
   const speed = Number.isFinite(speedValue) ? `${(speedValue * 3.6).toFixed(1)} km/h` : "不明";
+  const hasDelay = properties.delay_seconds !== null && properties.delay_seconds !== undefined;
+  const delaySeconds = Number(properties.delay_seconds);
+  const delay = hasDelay && Number.isFinite(delaySeconds)
+    ? `${delaySeconds < 0 ? "-" : ""}${Math.abs(Math.round(delaySeconds / 60))}分${delaySeconds < 0 ? "早着" : "遅延"}`
+    : "遅延情報なし";
   const timestampValue = Number(properties.timestamp);
   const timestamp = Number.isFinite(timestampValue) && timestampValue > 0
     ? new Date(timestampValue * 1000).toLocaleString("ja-JP", { hour12: false })
     : "不明";
-  const searchText = `${state.agencyName} ${vehicleLabel}`.trim();
-  const vehicleNumber = state.agencyName && vehicleLabel !== "不明"
+  const searchText = `${agencyName} 車両 ${vehicleLabel}`.trim();
+  const vehicleNumber = agencyName && vehicleLabel !== "不明"
     ? `<a href="https://www.google.com/search?q=${encodeURIComponent(searchText)}" target="_blank" rel="noopener noreferrer">車両番号: ${escapeHtml(vehicleLabel)}</a>`
     : `車両番号: ${escapeHtml(vehicleLabel)}`;
 
   const lines = [
     "車両情報",
     vehicleNumber,
+    `<span style="color: ${escapeHtml(vehicleColor)}">事業者: ${escapeHtml(agencyName || "不明")}</span>`,
     `路線: ${escapeHtml(routeName)}`,
+    `遅延: ${escapeHtml(delay)}`,
     `速度: ${escapeHtml(speed)}`,
     `更新時刻: ${escapeHtml(timestamp)}`,
   ];
@@ -423,7 +527,9 @@ function buildVehiclePopupHtml(properties = {}) {
     lines.splice(2, 0, `vehicle_id: ${escapeHtml(vehicleId)}`, `route_id: ${escapeHtml(routeId || "不明")}`, `trip_id: ${escapeHtml(tripId)}`);
   }
   if (state.showVehicleBearing) {
-    lines.splice(3 + (state.showVehicleIds ? 3 : 0), 0, `方位: ${escapeHtml(bearing)}`);
+    const isEstimated = properties.has_bearing === false && properties.estimated_bearing !== null && properties.estimated_bearing !== undefined;
+    const bearingLabel = isEstimated ? `${bearing}（推測）` : bearing;
+    lines.splice(3 + (state.showVehicleIds ? 3 : 0), 0, `方位: ${escapeHtml(bearingLabel)}`);
   }
   return lines.join("<br/>");
 }
@@ -433,6 +539,66 @@ function showVehiclePopup(coordinates, properties) {
     .setLngLat(coordinates)
     .setHTML(buildVehiclePopupHtml(properties))
     .addTo(map);
+}
+
+function getVehicleSearchLabel(feature) {
+  const properties = feature?.properties || {};
+  const vehicleLabel = normalizeDisplayText(properties.vehicle_label);
+  const vehicleId = normalizeDisplayText(properties.vehicle_id);
+  const routeId = normalizeDisplayText(properties.route_id);
+  const vehicleName = vehicleLabel || vehicleId || "車両番号不明";
+  const route = findRouteCatalogEntry(routeId);
+  const routeName = normalizeDisplayText(route?.route_long_name) || getRouteDisplayLabel(routeId);
+  const agencyName = normalizeDisplayText(properties.vehicle_agency_name);
+  const routeText = routeName && routeName !== routeId ? `(${routeName})` : "";
+  const agencyText = agencyName ? `(${agencyName})` : "";
+  return `${vehicleName}${routeText}${agencyText}`;
+}
+
+function performVehicleSearch(query) {
+  const normalizedQuery = normalizeDisplayText(query).toLowerCase();
+  return (state.vehicles.features || [])
+    .filter((feature) => {
+      const properties = feature?.properties || {};
+      const routeId = normalizeDisplayText(properties.route_id);
+      const searchableText = [
+        properties.vehicle_id,
+        properties.vehicle_label,
+        properties.trip_id,
+        routeId,
+        getRouteDisplayLabel(routeId),
+      ]
+        .map((value) => normalizeDisplayText(value).toLowerCase())
+        .join(" ");
+      return !normalizedQuery || searchableText.includes(normalizedQuery);
+    })
+    .slice(0, 50);
+}
+
+function renderVehicleSearchResults(results) {
+  if (!vehicleSearchList) return;
+  vehicleSearchList.innerHTML = "";
+  if (results.length === 0) {
+    const noResults = document.createElement("div");
+    noResults.className = "hint";
+    noResults.style.padding = "6px 8px";
+    noResults.textContent = state.vehicles.features?.length ? "検索結果なし" : "走行中の車両なし";
+    vehicleSearchList.appendChild(noResults);
+    return;
+  }
+
+  results.forEach((feature) => {
+    const item = document.createElement("div");
+    item.className = "stop-search-item";
+    item.textContent = getVehicleSearchLabel(feature);
+    item.addEventListener("click", () => {
+      const coordinates = feature?.geometry?.coordinates;
+      if (!Array.isArray(coordinates) || coordinates.length < 2) return;
+      map.easeTo({ center: coordinates, zoom: Math.max(map.getZoom(), 15), duration: 800 });
+      showVehiclePopup(coordinates, feature.properties || {});
+    });
+    vehicleSearchList.appendChild(item);
+  });
 }
 
 function syncVehicleMarkers() {
@@ -465,17 +631,20 @@ function syncVehicleMarkers() {
       } else {
         marker.setLngLat({ lng: longitude, lat: latitude });
       }
+      const hasDir = (properties.has_bearing === true) ||
+        (state.showEstimatedBearing && properties.estimated_bearing !== null && properties.estimated_bearing !== undefined);
+      marker.getElement().style.backgroundColor = properties.vehicle_color || "#e4572e";
       marker.getElement()._vehicleCoordinates = [longitude, latitude];
       marker.getElement()._vehicleProperties = properties;
-      marker.getElement().hidden = !state.showVehicles;
+      marker.getElement().hidden = !state.showVehicles || (state.showVehicleArrow && hasDir);
     } catch (error) {
       console.warn("車両Markerの描画をスキップしました", { markerId, longitude, latitude, error });
     }
   }
 
-  for (const [markerId, marker] of vehicleMarkers) {
+  for (const markerId of Array.from(vehicleMarkers.keys())) {
     if (!activeIds.has(markerId)) {
-      marker.remove();
+      vehicleMarkers.get(markerId)?.remove();
       vehicleMarkers.delete(markerId);
     }
   }
@@ -490,12 +659,16 @@ function focusMapOnVehicles() {
     .filter(([longitude, latitude]) => Number.isFinite(longitude) && Number.isFinite(latitude));
   if (!coordinates.length) return;
 
-  const longitudes = coordinates.map(([longitude]) => longitude);
-  const latitudes = coordinates.map(([, latitude]) => latitude);
-  const bounds = [
-    [Math.min(...longitudes), Math.min(...latitudes)],
-    [Math.max(...longitudes), Math.max(...latitudes)],
-  ];
+  let minLon = coordinates[0][0], maxLon = coordinates[0][0];
+  let minLat = coordinates[0][1], maxLat = coordinates[0][1];
+  for (let i = 1; i < coordinates.length; i++) {
+    const [lon, lat] = coordinates[i];
+    if (lon < minLon) minLon = lon;
+    if (lon > maxLon) maxLon = lon;
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+  }
+  const bounds = [[minLon, minLat], [maxLon, maxLat]];
   try {
     map.fitBounds(bounds, { padding: 80, maxZoom: 14, duration: 700 });
   } catch (error) {
@@ -517,14 +690,35 @@ function applyLayerVisibility() {
   }
   if (map.getLayer("vehicles-symbol")) {
     map.setLayoutProperty("vehicles-symbol", "visibility", state.showVehicles ? "visible" : "none");
+    map.setLayoutProperty("vehicles-symbol", "text-field", state.showVehicleIds ? ["get", "vehicle_id"] : "");
+  }
+  if (map.getLayer("vehicles-arrow")) {
+    const rotation = state.showEstimatedBearing
+      ? ["case",
+          ["!", ["coalesce", ["get", "has_bearing"], false]],
+          ["coalesce", ["get", "estimated_bearing"], ["get", "bearing"], 0],
+          ["coalesce", ["get", "bearing"], 0]]
+      : ["coalesce", ["get", "bearing"], 0];
+    const opacity = state.showEstimatedBearing
+      ? ["case", ["any", ["coalesce", ["get", "has_bearing"], false], ["!=", ["get", "estimated_bearing"], null]], 1, 0]
+      : ["case", ["coalesce", ["get", "has_bearing"], false], 1, 0];
+    map.setLayoutProperty("vehicles-arrow", "icon-rotate", rotation);
+    map.setPaintProperty("vehicles-arrow", "icon-opacity", opacity);
+    map.setLayoutProperty("vehicles-arrow", "visibility", (state.showVehicles && state.showVehicleArrow) ? "visible" : "none");
   }
   if (map.getLayer("vehicles-circle")) {
     map.setLayoutProperty("vehicles-circle", "visibility", state.showVehicles ? "visible" : "none");
+    const circleOpacity = state.showVehicleArrow
+      ? ["case", ["any", ["coalesce", ["get", "has_bearing"], false], ["!=", ["get", "estimated_bearing"], null]], 0, 0.95]
+      : 0.95;
+    map.setPaintProperty("vehicles-circle", "circle-opacity", circleOpacity);
   }
   for (const marker of vehicleMarkers.values()) {
-    marker.getElement().hidden = !state.showVehicles;
+    const props = marker.getElement()._vehicleProperties || {};
+    const hasDir = props.has_bearing === true ||
+      (state.showEstimatedBearing && props.estimated_bearing !== null && props.estimated_bearing !== undefined);
+    marker.getElement().hidden = !state.showVehicles || (state.showVehicleArrow && hasDir);
   }
-    console.log("[applyLayerVisibility]", { showStops: state.showStops, showVehicles: state.showVehicles, showStopConnections: state.showStopConnections, mergeRoundTrip: state.mergeRoundTrip, stopConnectionsVisible });
     updateDebugOverlay();
 }
 
@@ -542,6 +736,32 @@ function syncDisplayControls() {
   }
 }
 
+function syncMapFullscreenControl() {
+  if (!toggleMapFullscreenBtn) return;
+  const isFullscreen = document.fullscreenElement === map.getContainer().parentElement;
+  toggleMapFullscreenBtn.textContent = isFullscreen ? "全画面終了" : "全画面";
+  toggleMapFullscreenBtn.setAttribute(
+    "aria-label",
+    isFullscreen ? "地図の全画面表示を終了" : "地図を全画面表示",
+  );
+}
+
+async function toggleMapFullscreen() {
+  const mapArea = map.getContainer().parentElement;
+  if (!mapArea) return;
+
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await mapArea.requestFullscreen();
+    }
+  } catch (error) {
+    console.warn("地図の全画面表示を切り替えられませんでした", error);
+    return;
+  }
+}
+
 function applyDisplaySettings() {
   applyMergeModeVisualPolicy();
   updateRouteFilter();
@@ -555,7 +775,7 @@ function refreshOverlayLayers() {
   if (!map.hasImage('vehicle-arrow')) {
     const arrowImageData = createVehicleArrowIcon();
     if (arrowImageData) {
-      map.addImage('vehicle-arrow', arrowImageData, { sdf: false });
+      map.addImage('vehicle-arrow', arrowImageData, { sdf: true });
     }
   }
   
@@ -592,11 +812,11 @@ function switchBaseMapStyle(styleUrl) {
 
   state.baseMapStyle = styleUrl;
   saveUiState();
-  rtStatus.textContent = "地図スタイルを切り替え中...";
+  if (rtStatus) rtStatus.textContent = "地図スタイルを切り替え中...";
   map.setStyle(styleUrl);
   map.once("style.load", () => {
     refreshOverlayLayers();
-    rtStatus.textContent = "地図スタイルを切り替えました。";
+    if (rtStatus) rtStatus.textContent = "地図スタイルを切り替えました。";
   });
 }
 
@@ -838,6 +1058,15 @@ function normalizeRouteId(value) {
   return String(value ?? "").trim();
 }
 
+function routeBaseId(value) {
+  const s = normalizeRouteId(value);
+  const colonIdx = s.indexOf(":");
+  const rest = colonIdx >= 0 ? s.slice(colonIdx + 1) : s;
+  const us = rest.indexOf("_");
+  const base = us >= 0 ? rest.slice(0, us) : rest;
+  return colonIdx >= 0 ? s.slice(0, colonIdx + 1) + base : base;
+}
+
 function normalizeRouteDatasets() {
   const longRouteIds = new Set(
     (state.rawStopConnections.features || [])
@@ -850,11 +1079,9 @@ function normalizeRouteDatasets() {
     features: (state.rawStops.features || []).filter(
       (feature) =>
         (!state.showTodayStops ||
-          feature?.properties?.service_active_today === true ||
-          (feature?.properties?.service_active_today === undefined &&
-            (feature?.properties?.routes || []).length > 0)) &&
+          feature?.properties?.service_active_today === true) &&
         (!state.hideLongStopStations ||
-          (feature?.properties?.routes_all || feature?.properties?.routes || []).some(
+          (feature?.properties?.routes_all || []).some(
             (routeId) => !longRouteIds.has(normalizeRouteId(routeId)),
           )),
     ),
@@ -868,12 +1095,13 @@ function normalizeRouteDatasets() {
           Number(feature?.properties?.max_stop_spacing_km || 0) <= state.maxStopSpacingKm),
     ),
   };
+  const longRouteBases = new Set(Array.from(longRouteIds).map(routeBaseId));
   state.vehicles = {
     type: "FeatureCollection",
     features: (state.rawVehicles.features || []).filter(
       (feature) =>
         !state.hideLongRouteVehicles ||
-        !longRouteIds.has(normalizeRouteId(feature?.properties?.route_id)),
+        !longRouteBases.has(routeBaseId(feature?.properties?.route_id)),
     ),
   };
   if (!state.mergeRoundTrip) {
@@ -1060,6 +1288,7 @@ function normalizeRouteDatasets() {
           routeFeaturesByRouteId[mergedItem.color_source_route_id]?.properties?.route_color || mergedItem.route_color,
         member_route_ids: memberRouteIds,
         max_stop_spacing_km: Math.max(
+          0,
           ...memberRouteIds.flatMap((rid) =>
             (connectionFeaturesByRouteId[normalizeRouteId(rid)] || []).map(
               (feature) => Number(feature?.properties?.max_stop_spacing_km || 0),
@@ -1173,7 +1402,7 @@ function createLayersIfNeeded() {
       source: "vehicles",
       paint: {
         "circle-radius": 7,
-        "circle-color": "#e4572e",
+        "circle-color": ["coalesce", ["get", "vehicle_color"], "#e4572e"],
         "circle-stroke-color": "#ffffff",
         "circle-stroke-width": 2,
         "circle-opacity": 0.95,
@@ -1185,10 +1414,6 @@ function createLayersIfNeeded() {
       type: "symbol",
       source: "vehicles",
       layout: {
-        "icon-image": "vehicle-arrow",
-        "icon-size": 1.2,
-        "icon-rotate": ["coalesce", ["get", "bearing"], 0],
-        "icon-allow-overlap": true,
         "text-field": ["get", "vehicle_id"],
         "text-font": ["Open Sans Regular"],
         "text-size": 9,
@@ -1200,6 +1425,22 @@ function createLayersIfNeeded() {
         "text-color": "#333",
         "text-halo-color": "#fff",
         "text-halo-width": 0.8,
+      },
+    });
+    map.addLayer({
+      id: "vehicles-arrow",
+      type: "symbol",
+      source: "vehicles",
+      layout: {
+        "icon-image": "vehicle-arrow",
+        "icon-size": 1.2,
+        "icon-rotate": ["coalesce", ["get", "bearing"], 0],
+        "icon-allow-overlap": true,
+        visibility: (state.showVehicles && state.showVehicleArrow) ? "visible" : "none",
+      },
+      paint: {
+        "icon-color": ["coalesce", ["get", "vehicle_color"], "#e4572e"],
+        "icon-opacity": 1,
       },
     });
   }
@@ -1388,6 +1629,9 @@ function buildStopPopupHtml(properties) {
   const stopName = normalizeDisplayText(properties?.stop_name);
   const stopCode = normalizeDisplayText(properties?.stop_code);
   const stopId = normalizeDisplayText(properties?.stop_id);
+  const stopIds = Array.isArray(properties?.stop_ids)
+    ? properties.stop_ids.map(normalizeDisplayText).filter(Boolean)
+    : [];
   const parentStation = normalizeDisplayText(properties?.parent_station);
   const title = stopName || stopCode || `バス停 ${stopId || "不明"}`;
   const routes = Array.isArray(properties?.routes) ? properties.routes.filter(Boolean) : [];
@@ -1404,7 +1648,8 @@ function buildStopPopupHtml(properties) {
     `停留所名: <span class="stop-popup-name">${escapeHtml(title)}</span>`,
   ];
   if (state.showStopRouteIds) {
-    lines.push(`stop_id: ${escapeHtml(stopId || "不明")}`);
+    const displayedStopIds = stopIds.length > 0 ? stopIds : [stopId || "不明"];
+    lines.push(`stop_id: ${displayedStopIds.map(escapeHtml).join(", ")}`);
   }
   if (stopCode) {
     lines.push(`標柱コード: ${escapeHtml(stopCode)}`);
@@ -1464,6 +1709,27 @@ function resolveStopPropertiesById(stopId, fallbackProperties) {
     ...(fallbackProperties || {}),
     ...(matchedFeature?.properties || {}),
   };
+}
+
+function mergeStopProperties(features) {
+  const propertiesList = features
+    .map((feature) => feature?.properties || feature)
+    .filter((properties) => properties && typeof properties === "object");
+  if (propertiesList.length <= 1) {
+    return propertiesList[0] || {};
+  }
+
+  const merged = { ...propertiesList[0] };
+  const stopIds = [...new Set(propertiesList.map((properties) => normalizeDisplayText(properties.stop_id)).filter(Boolean))];
+  const arrayKeys = ["routes", "routes_all", "times"];
+  for (const key of arrayKeys) {
+    merged[key] = [...new Set(propertiesList.flatMap((properties) => (
+      Array.isArray(properties[key]) ? properties[key] : []
+    )))];
+  }
+  merged.stop_ids = stopIds;
+  merged.service_active_today = propertiesList.some((properties) => properties.service_active_today === true);
+  return merged;
 }
 
 async function resolveStopPropertiesWithApiFallback(stopId, fallbackProperties) {
@@ -1556,47 +1822,79 @@ async function showStopPopup(coordinates, properties = {}) {
 async function refreshGtfsList() {
   try {
     const response = await api("/gtfs_list");
-    const gtfsList = response.gtfs_list || [];
+    const gtfsItems = response.gtfs_list || [];
+    state.gtfsAgencies = Object.fromEntries(
+      gtfsItems.map((item) => [item.gtfs_id, item.agency_name || item.gtfs_id]),
+    );
 
-    if (!gtfsSelect) return;
-    gtfsSelect.innerHTML = "";
-    gtfsList.forEach((item) => {
-      const option = document.createElement("option");
-      option.value = item.gtfs_id;
-      option.textContent = `${item.gtfs_id} (路線: ${item.route_count}, 停留所: ${item.stop_count})`;
-      option.selected = item.is_current;
-      gtfsSelect.appendChild(option);
+    if (!gtfsList) return;
+    gtfsList.innerHTML = "";
+    gtfsItems.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "gtfs-list-row";
+
+      const label = document.createElement("label");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = item.gtfs_id;
+      checkbox.checked = item.is_active;
+      checkbox.addEventListener("change", () => updateActiveGtfs());
+
+      const summary = document.createElement("span");
+      summary.className = "gtfs-summary";
+      summary.textContent = `${item.gtfs_id} (路線: ${item.route_count}, 停留所: ${item.stop_count})`;
+      label.append(checkbox, summary);
+
+      const settingsButton = document.createElement("button");
+      settingsButton.type = "button";
+      settingsButton.className = "secondary-button";
+      settingsButton.textContent = "設定";
+      settingsButton.addEventListener("click", () => {
+        openGtfsDetailView(item.gtfs_id).catch((err) => {
+          if (datasetSettingsResult) datasetSettingsResult.textContent = `設定画面を開けませんでした: ${err.message}`;
+        });
+      });
+
+      row.append(label, settingsButton);
+      gtfsList.appendChild(row);
     });
 
-    if (gtfsList.length > 0) {
-      const current = gtfsList.find((item) => item.is_current);
-      if (current) {
-        gtfsSelectResult.textContent = `現在: ${current.gtfs_id} (路線: ${current.route_count}, 停留所: ${current.stop_count})`;
+    if (gtfsSelectResult) {
+      const activeItems = gtfsItems.filter((item) => item.is_active);
+      if (activeItems.length > 0) {
+        const activeNames = activeItems.map((item) => item.gtfs_id).join("、");
+        gtfsSelectResult.textContent = `表示中: ${activeNames}`;
+      } else {
+        gtfsSelectResult.textContent = "表示中のGTFSはありません";
       }
     }
   } catch (err) {
     console.warn("GTFS一覧の取得に失敗しました", err);
-    gtfsSelectResult.textContent = `読み込みエラー: ${err.message}`;
+    if (gtfsSelectResult) {
+      gtfsSelectResult.textContent = `読み込みエラー: ${err.message}`;
+    }
   }
 }
 
-async function selectGtfs(gtfsId) {
-  try {
-    gtfsSelectResult.textContent = "切り替え中...";
-    const response = await api(`/gtfs/select?gtfs_id=${encodeURIComponent(gtfsId)}`, {
-      method: "POST",
-    });
+function getSelectedGtfsIds() {
+  return Array.from(gtfsList?.querySelectorAll('input[type="checkbox"]:checked') || [])
+    .map((input) => input.value);
+}
 
-    const rtConfig = response.rt_config || {};
-    document.getElementById("rtUrlInput").value = rtConfig.gtfs_rt_url || "";
-    document.getElementById("rtIntervalInput").value = rtConfig.interval_sec || 10;
-    if (response.status) renderRtStatus(response.status);
-    gtfsSelectResult.textContent = `✓ 切り替え完了: ${gtfsId}`;
-    await reloadAllData();
-  } catch (err) {
-    gtfsSelectResult.textContent = `✗ 切り替え失敗: ${err.message}`;
-    console.error("GTFS選択に失敗しました", err);
+async function updateActiveGtfs() {
+  const selectedIds = getSelectedGtfsIds();
+  if (!selectedIds.length) {
+    if (datasetSettingsResult) datasetSettingsResult.textContent = "GTFSを1つ以上選択してください。";
+    await refreshGtfsList();
+    return;
   }
+  await api("/gtfs/active", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gtfs_ids: selectedIds }),
+  });
+  await refreshGtfsList();
+  await reloadAllData();
 }
 
 async function reloadAllData() {
@@ -1633,21 +1931,27 @@ async function reloadAllData() {
   refreshOverlayLayers();
   renderRouteList();
   renderStopSearchResults(performStopSearch(stopSearchInput?.value || ""));
+  renderVehicleSearchResults(performVehicleSearch(vehicleSearchInput?.value || ""));
   applyDisplaySettings();
   updateDebugOverlay();
   renderRtStatus(vehiclesPayload.status);
   setGtfsLoadProgress(100, "GTFSデータの読み込みが完了しました。");
+  loadedServiceDate = new Date().toDateString();
 }
 
-function uploadGtfsWithProgress(formData, gtfsId = "default", gtfsRtUrl = "", intervalSec = 10) {
+function uploadGtfsWithProgress(formData, gtfsId = "default", gtfsRtUrl = "", intervalSec = 10, vehicleColor = "#e4572e", tripUpdateUrl = "") {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const params = new URLSearchParams({
       gtfs_id: gtfsId,
       interval_sec: String(intervalSec),
+      vehicle_color: vehicleColor,
     });
     if (gtfsRtUrl) {
       params.set("gtfs_rt_url", gtfsRtUrl);
+    }
+    if (tripUpdateUrl) {
+      params.set("gtfs_trip_update_url", tripUpdateUrl);
     }
     xhr.open("POST", `/upload?${params.toString()}`);
     xhr.responseType = "json";
@@ -1689,7 +1993,9 @@ async function uploadGtfs() {
   const input = document.getElementById("gtfsZipInput");
   const gtfsIdInput = document.getElementById("gtfsIdInput");
   const gtfsRtUrlInput = document.getElementById("gtfsUploadRtUrlInput");
+  const gtfsTripUpdateUrlInput = document.getElementById("gtfsUploadTripUpdateUrlInput");
   const gtfsRtIntervalInput = document.getElementById("gtfsUploadRtIntervalInput");
+  const gtfsUploadVehicleColorInput = document.getElementById("gtfsUploadVehicleColorInput");
   const file = input.files?.[0];
   if (!file) {
     if (gtfsUploadResult) gtfsUploadResult.textContent = "ZIPファイルを選択してください。";
@@ -1700,6 +2006,7 @@ async function uploadGtfs() {
   formData.append("file", file);
   const gtfsId = gtfsIdInput.value.trim() || "default";
   const gtfsRtUrl = gtfsRtUrlInput.value.trim();
+  const tripUpdateUrl = gtfsTripUpdateUrlInput.value.trim();
   const intervalSec = Number(gtfsRtIntervalInput.value || "10");
 
   try {
@@ -1709,14 +2016,14 @@ async function uploadGtfs() {
       gtfsUploadProgressBar.style.width = "5%";
       gtfsUploadProgressText.textContent = "GTFSアップロードを開始しています...";
     }
-    const result = await uploadGtfsWithProgress(formData, gtfsId, gtfsRtUrl, intervalSec);
+    const result = await uploadGtfsWithProgress(formData, gtfsId, gtfsRtUrl, intervalSec, gtfsUploadVehicleColorInput.value, tripUpdateUrl);
     setGtfsLoadProgress(70, "GTFSをサーバーで読み込み中...");
     if (gtfsUploadResult) {
       gtfsUploadResult.textContent = `${result.message} routes=${result.routes}, stops=${result.stops}`;
     }
     await reloadAllData();
     await refreshGtfsList();
-    if (gtfsSelect) gtfsSelect.value = gtfsId;
+    await updateActiveGtfs();
     return result;
   } catch (err) {
     if (gtfsUploadResult) gtfsUploadResult.textContent = `失敗: ${err.message}`;
@@ -1726,18 +2033,28 @@ async function uploadGtfs() {
 }
 
 async function saveDatasetSettings() {
-  const selectedGtfs = document.getElementById("gtfsSelect").value;
+  const gtfsId = gtfsDetailTitle?.dataset.gtfsId;
   const url = document.getElementById("rtUrlInput").value.trim();
+  const tripUpdateUrl = document.getElementById("tripUpdateUrlInput").value.trim();
   const interval = Number(document.getElementById("rtIntervalInput").value || "10");
+  const vehicleColor = document.getElementById("rtVehicleColorInput").value;
 
   try {
     if (datasetSettingsResult) datasetSettingsResult.textContent = "設定を保存しています...";
-    const gtfsId = selectedGtfs || "default";
+    if (!gtfsId) {
+      throw new Error("設定対象のGTFSを選択してください。");
+    }
 
     const result = await api("/settings/dataset", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ gtfs_id: gtfsId, gtfs_rt_url: url || null, interval_sec: interval }),
+      body: JSON.stringify({
+        gtfs_id: gtfsId,
+        gtfs_rt_url: url || null,
+        gtfs_trip_update_url: tripUpdateUrl || null,
+        interval_sec: interval,
+        vehicle_color: vehicleColor,
+      }),
     });
     renderRtStatus(result.status);
     await refreshGtfsList();
@@ -1752,24 +2069,85 @@ async function saveDatasetSettings() {
 
 async function openDatasetSettings() {
   await refreshGtfsList();
-  const status = await api("/vehicles");
-  document.getElementById("rtUrlInput").value = status.status?.url || "";
-  document.getElementById("rtIntervalInput").value = status.status?.interval_sec || 10;
-  if (datasetSettingsResult) datasetSettingsResult.textContent = "";
+  showGtfsListView();
   datasetSettingsDialog?.showModal();
 }
 
-function openGtfsUpload() {
-  document.getElementById("gtfsIdInput").value = "default";
+function showGtfsListView() {
+  gtfsDetailRequestToken += 1;
+  gtfsListSection?.classList.remove("is-hidden");
+  gtfsDetailSection?.classList.add("is-hidden");
+  saveDatasetSettingsBtn?.classList.add("is-hidden");
+  if (datasetSettingsResult) datasetSettingsResult.textContent = "";
+}
+
+async function openGtfsDetailView(gtfsId = getSelectedGtfsIds()[0]) {
+  if (!gtfsId) {
+    if (datasetSettingsResult) datasetSettingsResult.textContent = "設定するGTFSを選択してください。";
+    return;
+  }
+  const requestToken = ++gtfsDetailRequestToken;
+  const response = await api("/gtfs_list");
+  if (requestToken !== gtfsDetailRequestToken) {
+    return;
+  }
+  const selected = (response.gtfs_list || []).find((item) => item.gtfs_id === gtfsId);
+  if (!selected) {
+    throw new Error(`GTFS「${gtfsId}」が見つかりません。`);
+  }
+  gtfsDetailTitle.textContent = `GTFS個別設定: ${selected.gtfs_id}`;
+  gtfsDetailTitle.dataset.gtfsId = selected.gtfs_id;
+  document.getElementById("rtUrlInput").value = selected.gtfs_rt_url || "";
+  document.getElementById("tripUpdateUrlInput").value = selected.gtfs_trip_update_url || "";
+  document.getElementById("rtIntervalInput").value = selected.interval_sec || 10;
+  document.getElementById("rtVehicleColorInput").value = selected.vehicle_color || "#e4572e";
+  gtfsListSection?.classList.add("is-hidden");
+  gtfsDetailSection?.classList.remove("is-hidden");
+  saveDatasetSettingsBtn?.classList.remove("is-hidden");
+  if (datasetSettingsResult) datasetSettingsResult.textContent = `設定対象: ${selected.gtfs_id}`;
+}
+
+function openGtfsUpload(targetGtfsId = null) {
+  // クリックイベントなどが誤って渡されても新規アップロードとして扱う
+  if (typeof targetGtfsId !== "string" || !targetGtfsId) {
+    targetGtfsId = null;
+  }
+  const gtfsIdInput = document.getElementById("gtfsIdInput");
+  const uploadDialogTitle = gtfsUploadDialog?.querySelector(".settings-dialog-header h2");
+  const uploadDialogEyebrow = gtfsUploadDialog?.querySelector(".settings-dialog-header .eyebrow");
+  const gtfsIdLabel = document.querySelector('label[for="gtfsIdInput"]');
+  gtfsIdInput.value = targetGtfsId || "default";
+  gtfsIdInput.readOnly = Boolean(targetGtfsId);
+  if (uploadDialogTitle) {
+    uploadDialogTitle.textContent = targetGtfsId ? "GTFSを上書きアップロード" : "新規GTFSをアップロード";
+  }
+  if (uploadDialogEyebrow) {
+    uploadDialogEyebrow.textContent = targetGtfsId ? "OVERWRITE GTFS" : "NEW GTFS";
+  }
+  if (gtfsIdLabel) {
+    gtfsIdLabel.textContent = targetGtfsId ? "上書き対象のGTFS ID" : "保存するGTFS ID";
+  }
   document.getElementById("gtfsZipInput").value = "";
-  document.getElementById("gtfsUploadRtUrlInput").value = "";
-  document.getElementById("gtfsUploadRtIntervalInput").value = "10";
+  if (targetGtfsId) {
+    document.getElementById("gtfsUploadRtUrlInput").value = document.getElementById("rtUrlInput").value;
+    document.getElementById("gtfsUploadTripUpdateUrlInput").value = document.getElementById("tripUpdateUrlInput").value;
+    document.getElementById("gtfsUploadRtIntervalInput").value = document.getElementById("rtIntervalInput").value;
+    document.getElementById("gtfsUploadVehicleColorInput").value = document.getElementById("rtVehicleColorInput").value;
+  } else {
+    document.getElementById("gtfsUploadRtUrlInput").value = "";
+    document.getElementById("gtfsUploadTripUpdateUrlInput").value = "";
+    document.getElementById("gtfsUploadRtIntervalInput").value = "10";
+    document.getElementById("gtfsUploadVehicleColorInput").value = "#e4572e";
+  }
   if (gtfsUploadResult) gtfsUploadResult.textContent = "";
+  if (gtfsUploadProgressWrap) gtfsUploadProgressWrap.classList.add("is-hidden");
+  if (gtfsUploadProgressBar) gtfsUploadProgressBar.style.width = "0%";
+  if (gtfsUploadProgressText) gtfsUploadProgressText.textContent = "";
   gtfsUploadDialog?.showModal();
 }
 
 async function deleteSelectedGtfs() {
-  const gtfsId = gtfsSelect?.value;
+  const gtfsId = gtfsDetailTitle?.dataset.gtfsId;
   if (!gtfsId) {
     return;
   }
@@ -1782,6 +2160,7 @@ async function deleteSelectedGtfs() {
     await api(`/gtfs/delete?gtfs_id=${encodeURIComponent(gtfsId)}`, { method: "DELETE" });
     await refreshGtfsList();
     await reloadAllData();
+    showGtfsListView();
     if (datasetSettingsResult) datasetSettingsResult.textContent = `GTFS「${gtfsId}」を削除しました。`;
   } catch (err) {
     if (datasetSettingsResult) datasetSettingsResult.textContent = `削除失敗: ${err.message}`;
@@ -1792,35 +2171,44 @@ function wireActions() {
   openDatasetSettingsBtn?.addEventListener("click", () => {
     openDatasetSettings().catch((err) => setRtStatus(`設定画面を開けませんでした: ${err.message}`, "error"));
   });
+  backToGtfsListBtn?.addEventListener("click", showGtfsListView);
   closeDatasetSettingsBtn?.addEventListener("click", () => datasetSettingsDialog?.close());
   cancelDatasetSettingsBtn?.addEventListener("click", () => datasetSettingsDialog?.close());
   saveDatasetSettingsBtn?.addEventListener("click", saveDatasetSettings);
   deleteGtfsBtn?.addEventListener("click", deleteSelectedGtfs);
-  openGtfsUploadBtn?.addEventListener("click", openGtfsUpload);
+  openGtfsUploadBtn?.addEventListener("click", () => openGtfsUpload(null));
+  openGtfsOverwriteBtn?.addEventListener("click", () => {
+    const gtfsId = gtfsDetailTitle?.dataset.gtfsId;
+    if (gtfsId) openGtfsUpload(gtfsId);
+  });
   closeGtfsUploadBtn?.addEventListener("click", () => gtfsUploadDialog?.close());
   cancelGtfsUploadBtn?.addEventListener("click", () => gtfsUploadDialog?.close());
   uploadGtfsBtn?.addEventListener("click", async () => {
     try {
       const result = await uploadGtfs();
       if (!result) return;
+      const wasOverwrite = document.getElementById("gtfsIdInput")?.readOnly;
       gtfsUploadDialog?.close();
-      if (datasetSettingsResult) datasetSettingsResult.textContent = "新しいGTFSを登録しました。内容を確認してまとめて保存してください。";
+      if (datasetSettingsResult) {
+        datasetSettingsResult.textContent = wasOverwrite
+          ? "GTFSを上書きアップロードしました。必要に応じて設定を確認し、「保存して閉じる」で閉じてください。"
+          : "新しいGTFSを登録し、表示対象に追加しました。必要に応じて設定を確認し、「保存して閉じる」で閉じてください。";
+      }
     } catch (err) {
       // uploadGtfs already renders the error in the upload dialog.
     }
   });
-
-  if (gtfsSelect) {
-    gtfsSelect.addEventListener("change", async (event) => {
-      await selectGtfs(event.target.value);
-    });
-  }
 
   if (stopSearchInput) {
     stopSearchInput.addEventListener("input", (event) => {
       const query = event.target.value;
       const results = performStopSearch(query);
       renderStopSearchResults(results);
+    });
+  }
+  if (vehicleSearchInput) {
+    vehicleSearchInput.addEventListener("input", (event) => {
+      renderVehicleSearchResults(performVehicleSearch(event.target.value));
     });
   }
 
@@ -1920,6 +2308,24 @@ function wireActions() {
       saveUiState();
     });
   }
+  const showVehicleArrowToggle = document.getElementById("showVehicleArrowToggle");
+  if (showVehicleArrowToggle) {
+    showVehicleArrowToggle.checked = state.showVehicleArrow;
+    showVehicleArrowToggle.addEventListener("change", () => {
+      state.showVehicleArrow = showVehicleArrowToggle.checked;
+      saveUiState();
+      applyLayerVisibility();
+    });
+  }
+  const showEstimatedBearingToggle = document.getElementById("showEstimatedBearingToggle");
+  if (showEstimatedBearingToggle) {
+    showEstimatedBearingToggle.checked = state.showEstimatedBearing;
+    showEstimatedBearingToggle.addEventListener("change", () => {
+      state.showEstimatedBearing = showEstimatedBearingToggle.checked;
+      saveUiState();
+      applyLayerVisibility();
+    });
+  }
   mergeColorSideSelect.value = state.mergeColorSide;
   mergeColorSideSelect.disabled = !state.mergeRoundTrip;
   syncStopConnectionsWidthControls();
@@ -1974,25 +2380,34 @@ function wireActions() {
 
   routeSearchInput.addEventListener("input", renderRouteList);
 
-  document.getElementById("toggleStopsBtn").addEventListener("click", () => {
+  toggleMapFullscreenBtn?.addEventListener("click", () => {
+    toggleMapFullscreen();
+  });
+  document.addEventListener("fullscreenchange", () => {
+    syncMapFullscreenControl();
+    map.resize();
+  });
+  syncMapFullscreenControl();
+
+  document.getElementById("toggleStopsBtn")?.addEventListener("click", () => {
     state.showStops = !state.showStops;
     applyDisplaySettings();
     saveUiState();
   });
 
-  document.getElementById("toggleVehiclesBtn").addEventListener("click", () => {
+  document.getElementById("toggleVehiclesBtn")?.addEventListener("click", () => {
     state.showVehicles = !state.showVehicles;
     applyDisplaySettings();
     saveUiState();
   });
 
-  document.getElementById("toggleStopConnectionsBtn").addEventListener("click", () => {
+  document.getElementById("toggleStopConnectionsBtn")?.addEventListener("click", () => {
     state.showStopConnections = !state.showStopConnections;
     applyDisplaySettings();
     saveUiState();
   });
 
-  document.getElementById("exportPngBtn").addEventListener("click", () => {
+  document.getElementById("exportPngBtn")?.addEventListener("click", () => {
     const exportWithQuality = async () => {
       // デバッグオーバーレイを一時的に隠す
       const debugOverlay = document.querySelector('.debug-overlay');
@@ -2034,7 +2449,7 @@ function wireActions() {
       }
     };
 
-    exportWithQuality();
+    exportWithQuality().catch((err) => console.error("PNG export error:", err));
   });
 
   map.on("click", "routes-line-hit", (e) => {
@@ -2049,10 +2464,12 @@ function wireActions() {
   });
 
   map.on("click", "stops-circle", async (e) => {
-    const f = e.features?.[0];
-    if (!f) return;
-    const p = f.properties || {};
-    await showStopPopup([e.lngLat.lng, e.lngLat.lat], p);
+    const features = e.features || [];
+    if (features.length === 0) return;
+    await showStopPopup(
+      [e.lngLat.lng, e.lngLat.lat],
+      mergeStopProperties(features),
+    );
   });
 
   map.on("click", "stop-connections-line-hit", (e) => {
@@ -2077,6 +2494,18 @@ function wireActions() {
     const p = f.properties || {};
     showVehiclePopup([e.lngLat.lng, e.lngLat.lat], p);
   });
+  map.on("click", "vehicles-arrow", (e) => {
+    const f = e.features?.[0];
+    if (!f) return;
+    const p = f.properties || {};
+    showVehiclePopup([e.lngLat.lng, e.lngLat.lat], p);
+  });
+  map.on("click", "vehicles-circle", (e) => {
+    const f = e.features?.[0];
+    if (!f) return;
+    const p = f.properties || {};
+    showVehiclePopup([e.lngLat.lng, e.lngLat.lat], p);
+  });
 
   map.on("moveend", saveMapView);
 }
@@ -2085,7 +2514,7 @@ map.on("load", async () => {
   ensureDebugOverlay();
   refreshOverlayLayers();
   wireActions();
-  rtStatus.textContent = "ベースマップを表示中...";
+  if (rtStatus) rtStatus.textContent = "ベースマップを表示中...";
   setGtfsLoadProgress(5, "GTFSデータを読み込み中...", "初期化しています");
 
   try {
@@ -2104,19 +2533,29 @@ map.on("load", async () => {
     }
   });
 
+  let isPollingVehicles = false;
   setInterval(async () => {
+    if (isPollingVehicles) return;
+    isPollingVehicles = true;
     try {
+      if (loadedServiceDate !== new Date().toDateString()) {
+        await reloadAllData();
+        return;
+      }
       const payload = await api("/vehicles");
       const hadVehicles = state.vehicles.features?.length > 0;
       state.rawVehicles = payload.vehicles;
       normalizeRouteDatasets();
       map.getSource("vehicles")?.setData(state.vehicles);
       syncVehicleMarkers();
+      renderVehicleSearchResults(performVehicleSearch(vehicleSearchInput?.value || ""));
       if (!hadVehicles) focusMapOnVehicles();
       renderRtStatus(payload.status);
       updateDebugOverlay();
     } catch (err) {
       setRtStatus(`RT取得失敗: ${err.message}`, "error");
+    } finally {
+      isPollingVehicles = false;
     }
   }, 10000);
 });

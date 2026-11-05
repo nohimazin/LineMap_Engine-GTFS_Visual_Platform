@@ -54,6 +54,10 @@ def main() -> None:
     parser.add_argument("rt_url", help="GTFS-RT feed URL")
     args = parser.parse_args()
 
+    if not args.gtfs_path.exists():
+        print(f"Error: file not found: {args.gtfs_path}")
+        sys.exit(2)
+
     result = asyncio.run(validate(args.gtfs_path, args.rt_url))
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

@@ -9,14 +9,7 @@ class DataStore:
     def __init__(self, db_path: str = "data/linemap.db") -> None:
         self._lock = threading.Lock()
         self._gtfs_data: dict[str, dict[str, Any]] = {}
-        self._current_gtfs_id: str = "default"
-        self._agency_name: str = ""
-        self._gtfs_rt_config: dict[str, Any] = {"gtfs_rt_url": None, "interval_sec": 10}
-        self._routes_geojson: dict[str, Any] = {"type": "FeatureCollection", "features": []}
-        self._stops_geojson: dict[str, Any] = {"type": "FeatureCollection", "features": []}
-        self._stop_connections_geojson: dict[str, Any] = {"type": "FeatureCollection", "features": []}
-        self._trip_to_route: dict[str, str] = {}
-        self._route_catalog: list[dict[str, Any]] = []
+        self._active_gtfs_ids: list[str] = []
 
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -56,42 +49,25 @@ class DataStore:
             conn.commit()
 
     def _load_from_db(self) -> None:
-        persisted_gtfs_data = self._load_blob("gtfs_data", {})
-        self._gtfs_data = persisted_gtfs_data if isinstance(persisted_gtfs_data, dict) else {}
-        persisted_current_id = self._load_blob("current_gtfs_id", "default")
-        self._current_gtfs_id = persisted_current_id if isinstance(persisted_current_id, str) else "default"
-        if self._current_gtfs_id in self._gtfs_data:
-            self.select_gtfs(self._current_gtfs_id)
+        self._gtfs_data = self._load_blob("gtfs_data", {})
+        self._active_gtfs_ids = self._load_blob("active_gtfs_ids", [])
 
     def list_gtfs(self) -> list[dict[str, Any]]:
         with self._lock:
             return [
                 {
                     "gtfs_id": gid,
-                    "is_current": gid == self._current_gtfs_id,
-                    "route_count": len(self._gtfs_data.get(gid, {}).get("route_catalog", [])),
-                    "stop_count": len(self._gtfs_data.get(gid, {}).get("stops_geojson", {}).get("features", [])),
+                    "agency_name": self._gtfs_data[gid]["agency_name"],
+                    "route_count": len(self._gtfs_data[gid]["route_catalog"]),
+                    "stop_count": len(self._gtfs_data[gid]["stops_geojson"]["features"]),
+                    "is_active": gid in self._active_gtfs_ids,
+                    "gtfs_rt_url": self._gtfs_data[gid]["gtfs_rt_config"]["gtfs_rt_url"],
+                    "gtfs_trip_update_url": self._gtfs_data[gid]["gtfs_rt_config"]["gtfs_trip_update_url"],
+                    "interval_sec": self._gtfs_data[gid]["gtfs_rt_config"]["interval_sec"],
+                    "vehicle_color": self._gtfs_data[gid]["gtfs_rt_config"]["vehicle_color"],
                 }
                 for gid in sorted(self._gtfs_data.keys())
             ]
-
-    def select_gtfs(self, gtfs_id: str) -> bool:
-        with self._lock:
-            if gtfs_id not in self._gtfs_data:
-                return False
-            self._activate_gtfs_unlocked(gtfs_id)
-            return True
-
-    def _activate_gtfs_unlocked(self, gtfs_id: str) -> None:
-        self._current_gtfs_id = gtfs_id
-        data = self._gtfs_data[gtfs_id]
-        self._agency_name = data.get("agency_name", "")
-        self._routes_geojson = data.get("routes_geojson", {"type": "FeatureCollection", "features": []})
-        self._stops_geojson = data.get("stops_geojson", {"type": "FeatureCollection", "features": []})
-        self._stop_connections_geojson = data.get("stop_connections_geojson", {"type": "FeatureCollection", "features": []})
-        self._trip_to_route = data.get("trip_to_route", {})
-        self._route_catalog = data.get("route_catalog", [])
-        self._gtfs_rt_config = data["gtfs_rt_config"]
 
     def delete_gtfs(self, gtfs_id: str) -> bool:
         with self._lock:
@@ -99,22 +75,9 @@ class DataStore:
                 return False
 
             del self._gtfs_data[gtfs_id]
-            if gtfs_id == self._current_gtfs_id:
-                next_gtfs_id = sorted(self._gtfs_data.keys())[0] if self._gtfs_data else None
-                if next_gtfs_id:
-                    self._activate_gtfs_unlocked(next_gtfs_id)
-                else:
-                    self._current_gtfs_id = "default"
-                    self._agency_name = ""
-                    self._routes_geojson = {"type": "FeatureCollection", "features": []}
-                    self._stops_geojson = {"type": "FeatureCollection", "features": []}
-                    self._stop_connections_geojson = {"type": "FeatureCollection", "features": []}
-                    self._trip_to_route = {}
-                    self._route_catalog = []
-                    self._gtfs_rt_config = {"gtfs_rt_url": None, "interval_sec": 10}
-
             self._save_blob("gtfs_data", self._gtfs_data)
-            self._save_blob("current_gtfs_id", self._current_gtfs_id)
+            self._active_gtfs_ids = [gid for gid in self._active_gtfs_ids if gid != gtfs_id]
+            self._save_blob("active_gtfs_ids", self._active_gtfs_ids)
             return True
 
     def update_gtfs(
@@ -124,15 +87,21 @@ class DataStore:
         stop_connections_geojson: dict[str, Any],
         trip_to_route: dict[str, str],
         route_catalog: list[dict[str, Any]],
+        service_date: str,
+        source_zip_base64: str,
         agency_name: str = "",
         gtfs_rt_url: str | None = None,
         interval_sec: int = 10,
+        vehicle_color: str = "#e4572e",
+        gtfs_trip_update_url: str | None = None,
         gtfs_id: str = "default",
     ) -> None:
         with self._lock:
             rt_config = {
                 "gtfs_rt_url": gtfs_rt_url,
+                "gtfs_trip_update_url": gtfs_trip_update_url,
                 "interval_sec": max(5, min(interval_sec, 60)),
+                "vehicle_color": vehicle_color or "#e4572e",
             }
             data = {
                 "agency_name": agency_name,
@@ -142,51 +111,93 @@ class DataStore:
                 "trip_to_route": trip_to_route,
                 "route_catalog": route_catalog,
                 "gtfs_rt_config": rt_config,
+                "service_date": service_date,
+                "source_zip_base64": source_zip_base64,
             }
             self._gtfs_data[gtfs_id] = data
-            self._current_gtfs_id = gtfs_id
-            self._agency_name = agency_name
-            self._routes_geojson = routes_geojson
-            self._stops_geojson = stops_geojson
-            self._stop_connections_geojson = stop_connections_geojson
-            self._trip_to_route = trip_to_route
-            self._route_catalog = route_catalog
-            self._gtfs_rt_config = dict(rt_config)
-
             self._save_blob("gtfs_data", self._gtfs_data)
-            self._save_blob("current_gtfs_id", self._current_gtfs_id)
+            if gtfs_id not in self._active_gtfs_ids:
+                self._active_gtfs_ids.append(gtfs_id)
+            self._save_blob("active_gtfs_ids", self._active_gtfs_ids)
 
-    def routes_geojson(self) -> dict[str, Any]:
+    def active_gtfs_ids(self) -> list[str]:
         with self._lock:
-            return self._routes_geojson
+            return list(self._active_gtfs_ids)
 
-    def stops_geojson(self) -> dict[str, Any]:
+    def set_active_gtfs_ids(self, gtfs_ids: list[str]) -> None:
         with self._lock:
-            return self._stops_geojson
+            invalid = [gid for gid in gtfs_ids if gid not in self._gtfs_data]
+            if invalid or not gtfs_ids:
+                raise ValueError("有効なGTFSを1つ以上指定してください。")
+            self._active_gtfs_ids = list(dict.fromkeys(gtfs_ids))
+            self._save_blob("active_gtfs_ids", self._active_gtfs_ids)
 
-    def stop_connections_geojson(self) -> dict[str, Any]:
+    def gtfs_data(self, gtfs_id: str) -> dict[str, Any] | None:
         with self._lock:
-            return self._stop_connections_geojson
+            data = self._gtfs_data.get(gtfs_id)
+            if not data:
+                return None
+            return {
+                "agency_name": data["agency_name"],
+                "routes_geojson": data["routes_geojson"],
+                "stops_geojson": data["stops_geojson"],
+                "stop_connections_geojson": data["stop_connections_geojson"],
+                "trip_to_route": dict(data["trip_to_route"]),
+                "route_catalog": [dict(item) for item in data["route_catalog"]],
+                "gtfs_rt_config": dict(data["gtfs_rt_config"]),
+                "service_date": data["service_date"],
+                "source_zip_base64": data["source_zip_base64"],
+            }
 
-    def trip_to_route(self) -> dict[str, str]:
+    def active_map_data(self) -> dict[str, Any]:
         with self._lock:
-            return self._trip_to_route
+            routes, stops, connections, catalog = [], [], [], []
+            for gid in self._active_gtfs_ids:
+                data = self._gtfs_data[gid]
+                prefix = f"{gid}:"
+                for collection, target in (
+                    (data["routes_geojson"], routes),
+                    (data["stops_geojson"], stops),
+                    (data["stop_connections_geojson"], connections),
+                ):
+                    for feature in collection.get("features", []):
+                        props = dict(feature.get("properties", {}))
+                        if props.get("stop_id"):
+                            props["stop_id"] = prefix + str(props["stop_id"])
+                        for key in ("route_id",):
+                            if props.get(key):
+                                props[key] = prefix + str(props[key])
+                        if props.get("routes"):
+                            props["routes"] = [prefix + str(value) for value in props["routes"]]
+                        if props.get("routes_all"):
+                            props["routes_all"] = [prefix + str(value) for value in props["routes_all"]]
+                        props["dataset_id"] = gid
+                        target.append({
+                            "type": feature.get("type", "Feature"),
+                            "geometry": feature.get("geometry"),
+                            "properties": props,
+                        })
+                for item in data["route_catalog"]:
+                    item = dict(item)
+                    item["route_id"] = prefix + str(item["route_id"])
+                    item["dataset_id"] = gid
+                    catalog.append(item)
+            return {
+                "routes": {"type": "FeatureCollection", "features": routes},
+                "stops": {"type": "FeatureCollection", "features": stops},
+                "stop_connections": {"type": "FeatureCollection", "features": connections},
+                "route_catalog": catalog,
+                "active_gtfs_ids": list(self._active_gtfs_ids),
+            }
 
-    def route_catalog(self) -> list[dict[str, Any]]:
+    def update_gtfs_rt_config(self, gtfs_id: str, gtfs_rt_url: str | None, interval_sec: int, vehicle_color: str, gtfs_trip_update_url: str | None = None) -> None:
         with self._lock:
-            return self._route_catalog
-
-    def agency_name(self) -> str:
-        with self._lock:
-            return self._agency_name
-
-    def gtfs_rt_config(self) -> dict[str, Any]:
-        with self._lock:
-            return dict(self._gtfs_rt_config)
-
-    def update_gtfs_rt_config(self, gtfs_rt_url: str | None, interval_sec: int) -> None:
-        with self._lock:
-            self._gtfs_rt_config = {"gtfs_rt_url": gtfs_rt_url, "interval_sec": interval_sec}
-            if self._current_gtfs_id in self._gtfs_data:
-                self._gtfs_data[self._current_gtfs_id]["gtfs_rt_config"] = dict(self._gtfs_rt_config)
-                self._save_blob("gtfs_data", self._gtfs_data)
+            if gtfs_id not in self._gtfs_data:
+                raise ValueError(f"GTFS {gtfs_id} が見つかりません")
+            self._gtfs_data[gtfs_id]["gtfs_rt_config"] = {
+                "gtfs_rt_url": gtfs_rt_url,
+                "gtfs_trip_update_url": gtfs_trip_update_url,
+                "interval_sec": max(5, min(interval_sec, 60)),
+                "vehicle_color": vehicle_color,
+            }
+            self._save_blob("gtfs_data", self._gtfs_data)

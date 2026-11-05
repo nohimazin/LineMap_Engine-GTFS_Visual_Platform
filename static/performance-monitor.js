@@ -2,83 +2,56 @@
 // 停留所連結線や停留所表示の切り替え時間を、ブラウザのコンソールから計測する。
 
 globalThis.PerformanceMonitor = {
+  _getMap: function() {
+    return window.__linemapMap || window.map || null;
+  },
+
   /**
    * 停留所連結線の表示/非表示切替のパフォーマンスを計測する
    */
   measureStopConnectionToggle: async function() {
     console.group('🔍 停留所連結線の表示切替 パフォーマンス計測');
     
-    if (!window.map) {
+    const map = this._getMap();
+    if (!map) {
       console.error('❌ MapLibreが初期化されていません');
       console.groupEnd();
       return;
     }
 
+    let initialVisibility = 'visible';
     try {
-      // 現在の状態を確認
-      const visibility = map.getLayoutProperty('stop-connections-line', 'visibility');
-      const targetVisibility = visibility === 'visible' ? 'none' : 'visible';
+      initialVisibility = map.getLayoutProperty('stop-connections-line', 'visibility') || 'visible';
+      const targetVisibility = initialVisibility === 'visible' ? 'none' : 'visible';
       const action = targetVisibility === 'visible' ? '表示' : '非表示';
       
-      console.log(`現在の状態: ${visibility}, 目標: ${targetVisibility} (${action})`);
+      console.log(`現在の状態: ${initialVisibility}, 目標: ${targetVisibility} (${action})`);
       
-      // レイアウトエンジンのフラッシュを待つ
-      await new Promise(resolve => {
-        const onRender = () => {
-          map.off('render', onRender);
-          resolve();
-        };
-        map.on('render', onRender);
-        
-        // タイムアウト保護
-        setTimeout(() => {
-          map.off('render', onRender);
-          resolve();
-        }, 5000);
-      });
-
       const measurements = [];
       
       for (let i = 0; i < 3; i++) {
         const startTime = performance.now();
         
-        // 表示/非表示を切り替え
         map.setLayoutProperty('stop-connections-line', 'visibility', targetVisibility);
         if (map.getLayer('stop-connections-line-hit')) {
           map.setLayoutProperty('stop-connections-line-hit', 'visibility', targetVisibility);
         }
         
-        // 次のレンダリング完了を待つ
-        await new Promise(resolve => {
-          let renderCount = 0;
-          const maxWait = 100; // ms
-          const interval = setInterval(() => {
-            renderCount++;
-            const elapsed = performance.now() - startTime;
-            if (elapsed > maxWait || renderCount > 1) {
-              clearInterval(interval);
-              resolve();
-            }
-          }, 10);
-        });
+        await new Promise(resolve => setTimeout(resolve, 100));
         
         const endTime = performance.now();
         const duration = endTime - startTime;
-        
         measurements.push(duration);
         console.log(`  試行${i + 1}: ${duration.toFixed(2)}ms`);
         
-        // 次の試行前に状態を戻す
-        await new Promise(resolve => setTimeout(resolve, 200));
-        const reverseVisibility = targetVisibility === 'visible' ? 'none' : 'visible';
-        map.setLayoutProperty('stop-connections-line', 'visibility', reverseVisibility);
+        await new Promise(resolve => setTimeout(resolve, 150));
+        map.setLayoutProperty('stop-connections-line', 'visibility', initialVisibility);
         if (map.getLayer('stop-connections-line-hit')) {
-          map.setLayoutProperty('stop-connections-line-hit', 'visibility', reverseVisibility);
+          map.setLayoutProperty('stop-connections-line-hit', 'visibility', initialVisibility);
         }
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await new Promise(resolve => setTimeout(resolve, 150));
       }
       
-      // 統計
       const avg = measurements.reduce((a, b) => a + b, 0) / measurements.length;
       const min = Math.min(...measurements);
       const max = Math.max(...measurements);
@@ -95,9 +68,15 @@ globalThis.PerformanceMonitor = {
       } else {
         console.log('❌ パフォーマンス低下 (平均 >= 100ms)');
       }
-      
     } catch (err) {
       console.error('❌ 計測エラー:', err);
+    } finally {
+      if (map && map.getLayer('stop-connections-line')) {
+        map.setLayoutProperty('stop-connections-line', 'visibility', initialVisibility);
+        if (map.getLayer('stop-connections-line-hit')) {
+          map.setLayoutProperty('stop-connections-line-hit', 'visibility', initialVisibility);
+        }
+      }
     }
     
     console.groupEnd();
@@ -109,18 +88,20 @@ globalThis.PerformanceMonitor = {
   measureStopsToggle: async function() {
     console.group('🔍 停留所表示切替 パフォーマンス計測');
     
-    if (!window.map) {
+    const map = this._getMap();
+    if (!map) {
       console.error('❌ MapLibreが初期化されていません');
       console.groupEnd();
       return;
     }
 
+    let initialVisibility = 'visible';
     try {
-      const visibility = map.getLayoutProperty('stops-circle', 'visibility');
-      const targetVisibility = visibility === 'visible' ? 'none' : 'visible';
+      initialVisibility = map.getLayoutProperty('stops-circle', 'visibility') || 'visible';
+      const targetVisibility = initialVisibility === 'visible' ? 'none' : 'visible';
       const action = targetVisibility === 'visible' ? '表示' : '非表示';
       
-      console.log(`現在の状態: ${visibility}, 目標: ${targetVisibility} (${action})`);
+      console.log(`現在の状態: ${initialVisibility}, 目標: ${targetVisibility} (${action})`);
       
       const measurements = [];
       
@@ -129,27 +110,16 @@ globalThis.PerformanceMonitor = {
         
         map.setLayoutProperty('stops-circle', 'visibility', targetVisibility);
         
-        await new Promise(resolve => {
-          let elapsed = 0;
-          const interval = setInterval(() => {
-            elapsed += 10;
-            if (elapsed > 100) {
-              clearInterval(interval);
-              resolve();
-            }
-          }, 10);
-        });
+        await new Promise(resolve => setTimeout(resolve, 100));
         
         const endTime = performance.now();
         const duration = endTime - startTime;
-        
         measurements.push(duration);
         console.log(`  試行${i + 1}: ${duration.toFixed(2)}ms`);
         
-        await new Promise(resolve => setTimeout(resolve, 200));
-        const reverseVisibility = targetVisibility === 'visible' ? 'none' : 'visible';
-        map.setLayoutProperty('stops-circle', 'visibility', reverseVisibility);
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await new Promise(resolve => setTimeout(resolve, 150));
+        map.setLayoutProperty('stops-circle', 'visibility', initialVisibility);
+        await new Promise(resolve => setTimeout(resolve, 150));
       }
       
       const avg = measurements.reduce((a, b) => a + b, 0) / measurements.length;
@@ -168,9 +138,12 @@ globalThis.PerformanceMonitor = {
       } else {
         console.log('❌ パフォーマンス低下');
       }
-      
     } catch (err) {
       console.error('❌ 計測エラー:', err);
+    } finally {
+      if (map && map.getLayer('stops-circle')) {
+        map.setLayoutProperty('stops-circle', 'visibility', initialVisibility);
+      }
     }
     
     console.groupEnd();
@@ -191,6 +164,5 @@ globalThis.PerformanceMonitor = {
   }
 };
 
-// 初期化完了ログ
 console.log('✅ PerformanceMonitor が読み込まれました');
 console.log('実行: PerformanceMonitor.help() でヘルプを表示');
