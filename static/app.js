@@ -928,6 +928,11 @@ function alignLineDirection(sampleA, sampleB) {
 }
 
 function buildCenterLine(lineA, lineB) {
+  // 環状路線（閉じたループ）の場合は中心線の平均計算が破綻するため、
+  // 代表ルート（点数が多い方、同数なら lineA）のジオメトリをそのまま使用する
+  if (isLoopLine(lineA) && isLoopLine(lineB)) {
+    return lineA.length >= lineB.length ? [...lineA] : [...lineB];
+  }
   if (lineA.length < 2 || lineB.length < 2) return [];
   const sampleCount = Math.max(24, Math.min(140, Math.max(lineA.length, lineB.length) * 2));
   const sampleA = resampleLine(lineA, sampleCount);
@@ -1022,6 +1027,18 @@ function buildRouteDirectionKey(route) {
 }
 
 function canMergeRoutePair(routeA, routeB) {
+  // 環状路線（閉じたループ）の場合は向き（時計回り/反時計回り）が逆なら統合
+  const geomA = getStopConnectionGeometry(routeA.route_id);
+  const geomB = getStopConnectionGeometry(routeB.route_id);
+  const loopA = isLoopGeometry(geomA);
+  const loopB = isLoopGeometry(geomB);
+  if (loopA || loopB) {
+    if (!loopA || !loopB) return false;
+    const orientA = loopOrientationGeometry(geomA);
+    const orientB = loopOrientationGeometry(geomB);
+    return orientA !== 0 && orientB !== 0 && orientA !== orientB;
+  }
+
   const routeKeyA = buildRouteDirectionKey(routeA);
   const routeKeyB = buildRouteDirectionKey(routeB);
   if (routeKeyA.startsWith("route-pair:") && routeKeyA === routeKeyB) {
@@ -1065,6 +1082,42 @@ function routeBaseId(value) {
   const us = rest.indexOf("_");
   const base = us >= 0 ? rest.slice(0, us) : rest;
   return colonIdx >= 0 ? s.slice(0, colonIdx + 1) + base : base;
+}
+
+function isLoopLine(line) {
+  if (!Array.isArray(line) || line.length < 3) return false;
+  const first = line[0], last = line[line.length - 1];
+  return Math.abs(first[0] - last[0]) < 1e-9 && Math.abs(first[1] - last[1]) < 1e-9;
+}
+
+function loopOrientationLine(line) {
+  if (!isLoopLine(line)) return 0;
+  const pts = line.slice(0, -1);
+  if (pts.length < 3) return 0;
+  let area = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    area += a[0] * b[1] - b[0] * a[1];
+  }
+  return area > 0 ? 1 : (area < 0 ? -1 : 0);
+}
+
+function isLoopGeometry(geometry) {
+  const line = pickLongestLine(geometry);
+  return isLoopLine(line);
+}
+
+function loopOrientationGeometry(geometry) {
+  const line = pickLongestLine(geometry);
+  return loopOrientationLine(line);
+}
+
+function getStopConnectionGeometry(routeId) {
+  const rid = normalizeRouteId(routeId);
+  for (const f of (state.rawStopConnections.features || [])) {
+    if (normalizeRouteId(f?.properties?.route_id) === rid) return f.geometry;
+  }
+  return null;
 }
 
 function normalizeRouteDatasets() {
@@ -1133,6 +1186,14 @@ function normalizeRouteDatasets() {
   for (const routes of groups.values()) {
     if (routes.length === 2 && canMergeRoutePair(routes[0], routes[1])) {
       mergeGroups.push(routes);
+    } else if (routes.length > 2 && routes.every((r) => isLoopGeometry(getStopConnectionGeometry(r.route_id)))) {
+      // 環状路線グループ: 時計回り/反時計回りをペアリング
+      const cw = routes.filter((r) => loopOrientationGeometry(getStopConnectionGeometry(r.route_id)) === 1);
+      const ccw = routes.filter((r) => loopOrientationGeometry(getStopConnectionGeometry(r.route_id)) === -1);
+      const pairs = Math.min(cw.length, ccw.length);
+      for (let i = 0; i < pairs; i++) mergeGroups.push([cw[i], ccw[i]]);
+      for (let i = pairs; i < cw.length; i++) mergeGroups.push([cw[i]]);
+      for (let i = pairs; i < ccw.length; i++) mergeGroups.push([ccw[i]]);
     } else {
       routes.forEach((route) => mergeGroups.push([route]));
     }
